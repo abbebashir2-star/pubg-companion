@@ -25,18 +25,23 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      - name: Ensure Android SDK
+        run: |
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          export PATH="$PATH:$SDK/cmdline-tools/latest/bin:$SDK/cmdline-tools/bin:$SDK/tools/bin"
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" > /dev/null 2>&1 || true
+
       - name: Generate the whole project
         run: |
           cat > /tmp/gen.sh <<'BOOTSTRAP'
           #!/usr/bin/env bash
           set -euo pipefail
 
-          PKG="app/src/main/java/ai/venice/pubgcompanion"
+          PKG="app/src/main/java/com/qalbidagx/pubg"
           mkdir -p "$PKG"/{core,data,system,service,ui/theme,ui/screens,util}
           mkdir -p app/src/main/res/{values,drawable,mipmap-anydpi-v26}
           mkdir -p gradle/wrapper
-
-          echo "==> skriver projektfiler"
 
           cat > settings.gradle.kts <<'EOF'
           pluginManagement {
@@ -46,7 +51,7 @@ jobs:
               repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
               repositories { google(); mavenCentral() }
           }
-          rootProject.name = "PubgCompanion"
+          rootProject.name = "QalbiDagxPubg"
           include(":app")
           EOF
 
@@ -98,13 +103,13 @@ jobs:
           EOF
 
           cat > README.md <<'EOF'
-          # PUBG Companion
+          # QalbiDagx PUBG
 
-          Android performance companion for PUBG Mobile. Detects match start via usage
-          stats, applies a saved profile, restores everything when the match ends.
+          Performance companion for PUBG Mobile. Profiles the SoC, pins the game to the
+          big cluster, neutralises background load, draws a crosshair, records gameplay,
+          and restores everything afterwards.
 
-          Install [Shizuku](https://shizuku.rikka.app/) for the full feature set.
-          Grab the APK from the Releases tab.
+          Grab the APK from Releases. Install Shizuku for the full feature set.
           EOF
 
           cat > app/build.gradle.kts <<'EOF'
@@ -116,14 +121,14 @@ jobs:
           }
 
           android {
-              namespace = "ai.venice.pubgcompanion"
+              namespace = "com.qalbidagx.pubg"
               compileSdk = 35
 
               defaultConfig {
-                  applicationId = "ai.venice.pubgcompanion"
+                  applicationId = "com.qalbidagx.pubg"
                   minSdk = 26
                   targetSdk = 35
-                  versionCode = 1
+                  versionCode = 4
                   versionName = "1.0"
               }
 
@@ -162,12 +167,14 @@ jobs:
 
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
               <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
               <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
               <uses-permission android:name="android.permission.WRITE_SETTINGS" />
               <uses-permission android:name="android.permission.INTERNET" />
               <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+              <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
                   tools:ignore="QueryAllPackagesPermission" />
 
@@ -203,6 +210,11 @@ jobs:
                           android:value="performance overlay" />
                   </service>
 
+                  <service
+                      android:name=".service.RecorderService"
+                      android:exported="false"
+                      android:foregroundServiceType="mediaProjection" />
+
                   <provider
                       android:name="rikka.shizuku.ShizukuProvider"
                       android:authorities="${applicationId}.shizuku"
@@ -216,7 +228,7 @@ jobs:
 
           cat > app/src/main/res/values/strings.xml <<'EOF'
           <resources>
-              <string name="app_name">PUBG Companion</string>
+              <string name="app_name">QalbiDagx PUBG</string>
           </resources>
           EOF
 
@@ -264,7 +276,7 @@ jobs:
           EOF
 
           cat > "$PKG/core/GamePackages.kt" <<'EOF'
-          package ai.venice.pubgcompanion.core
+          package com.qalbidagx.pubg.core
 
           object GamePackages {
 
@@ -282,7 +294,7 @@ jobs:
           EOF
 
           cat > "$PKG/core/PerfMode.kt" <<'EOF'
-          package ai.venice.pubgcompanion.core
+          package com.qalbidagx.pubg.core
 
           import androidx.compose.ui.graphics.Color
 
@@ -293,32 +305,32 @@ jobs:
               val accent: Color,
               val cpuGovernor: String?,
               val gpuGovernor: String?,
-              val coresOnline: Int,
               val animationScale: Float,
               val fixedPerformance: Boolean,
               val thermalOverride: Boolean,
               val touchBoost: Boolean,
               val enhancedCpu: Boolean,
+              val pinCores: Boolean,
           ) {
               ECO(
                   "eco", "ECO", "Cold and quiet",
                   Color(0xFF3DDC84),
-                  "schedutil", null, 4, 1.0f, false, false, false, false,
+                  "schedutil", null, 1.0f, false, false, false, false, false,
               ),
               BALANCED(
                   "balanced", "BALANCED", "Daily default",
                   Color(0xFF00E5FF),
-                  "schedutil", null, 6, 1.0f, false, false, true, true,
+                  "schedutil", null, 1.0f, false, false, true, true, true,
               ),
               PERFORMANCE(
-                  "performance", "PERFORMANCE", "All cores, snappy UI",
+                  "performance", "PERFORMANCE", "Big cluster, snappy UI",
                   Color(0xFFFFB300),
-                  "performance", "performance", 8, 0.5f, false, false, true, true,
+                  "performance", "performance", 0.5f, false, false, true, true, true,
               ),
               RISE(
                   "rise", "RISE", "Max output, no throttle",
                   Color(0xFFFF2A3C),
-                  "performance", "performance", 8, 0.0f, true, true, true, true,
+                  "performance", "performance", 0.0f, true, true, true, true, true,
               );
 
               companion object {
@@ -328,7 +340,7 @@ jobs:
           EOF
 
           cat > "$PKG/core/Permissions.kt" <<'EOF'
-          package ai.venice.pubgcompanion.core
+          package com.qalbidagx.pubg.core
 
           import android.app.AppOpsManager
           import android.app.NotificationManager
@@ -343,7 +355,7 @@ jobs:
 
           enum class PermissionKind(val title: String, val why: String) {
               USAGE_ACCESS("Usage access", "Lets the app see that PUBG started."),
-              OVERLAY("Draw over other apps", "Needed for the stats overlay and crosshair."),
+              OVERLAY("Draw over other apps", "Needed for the overlay and crosshair."),
               DND("Do Not Disturb access", "Silences notifications during a match."),
               WRITE_SETTINGS("Modify system settings", "Brightness, touch sensitivity, timeout."),
               BATTERY("Ignore battery optimisation", "Otherwise Samsung kills the service."),
@@ -409,7 +421,7 @@ jobs:
           EOF
 
           cat > "$PKG/data/Profile.kt" <<'EOF'
-          package ai.venice.pubgcompanion.data
+          package com.qalbidagx.pubg.data
 
           import android.content.Context
           import androidx.room.*
@@ -428,9 +440,13 @@ jobs:
               val resolutionWidth: Int = 1280,
               val resolutionHeight: Int = 720,
               val resolutionDpi: Int = 320,
+              val pinToBigCores: Boolean = true,
+              val boostPriority: Boolean = true,
+              val restrictBackground: Boolean = true,
+              val chargeSeparation: Boolean = true,
               val killBackground: Boolean = false,
               val thermalGuard: Boolean = true,
-              val temperatureLimitC: Int = 42,
+              val temperatureLimitC: Int = 43,
           )
 
           @Dao
@@ -446,7 +462,7 @@ jobs:
               @Delete suspend fun delete(p: Profile)
           }
 
-          @Database(entities = [Profile::class], version = 1, exportSchema = false)
+          @Database(entities = [Profile::class], version = 3, exportSchema = false)
           abstract class AppDatabase : RoomDatabase() {
               abstract fun profiles(): ProfileDao
 
@@ -455,7 +471,7 @@ jobs:
 
                   fun get(ctx: Context): AppDatabase = instance ?: synchronized(this) {
                       instance ?: Room.databaseBuilder(
-                          ctx.applicationContext, AppDatabase::class.java, "companion.db"
+                          ctx.applicationContext, AppDatabase::class.java, "qalbidagx.db"
                       ).fallbackToDestructiveMigration().build().also { instance = it }
                   }
               }
@@ -489,8 +505,45 @@ jobs:
           }
           EOF
 
+          cat > "$PKG/data/CrosshairStyle.kt" <<'EOF'
+          package com.qalbidagx.pubg.data
+
+          data class CrosshairStyle(
+              val shape: String = "crossdot",
+              val color: Int = 0xFFFF2A3C.toInt(),
+              val sizePx: Int = 22,
+              val thicknessPx: Int = 3,
+              val gapPx: Int = 8,
+              val dotRadiusPx: Int = 3,
+              val alpha: Int = 220,
+              val outline: Boolean = true,
+          ) {
+              companion object {
+                  val SHAPES = listOf(
+                      "cross" to "Cross",
+                      "crossdot" to "Cross + dot",
+                      "dot" to "Dot",
+                      "circle" to "Circle",
+                      "chevron" to "Chevron",
+                      "tee" to "T",
+                  )
+
+                  val COLORS = listOf(
+                      0xFFFF2A3C.toInt() to "Red",
+                      0xFF00E5FF.toInt() to "Cyan",
+                      0xFF3DDC84.toInt() to "Green",
+                      0xFFFFB300.toInt() to "Amber",
+                      0xFFFFFFFF.toInt() to "White",
+                      0xFFFF00FF.toInt() to "Magenta",
+                      0xFF9C27B0.toInt() to "Purple",
+                      0xFF000000.toInt() to "Black",
+                  )
+              }
+          }
+          EOF
+
           cat > "$PKG/data/SettingsStore.kt" <<'EOF'
-          package ai.venice.pubgcompanion.data
+          package com.qalbidagx.pubg.data
 
           import android.content.Context
           import androidx.datastore.preferences.core.*
@@ -498,7 +551,7 @@ jobs:
           import kotlinx.coroutines.flow.Flow
           import kotlinx.coroutines.flow.map
 
-          private val Context.dataStore by preferencesDataStore("companion_settings")
+          private val Context.dataStore by preferencesDataStore("qalbidagx_settings")
 
           class SettingsStore(private val ctx: Context) {
 
@@ -507,47 +560,89 @@ jobs:
               val gameModeEnabled: Flow<Boolean> = ds.data.map { it[GAME_MODE] ?: false }
               val overlayEnabled: Flow<Boolean> = ds.data.map { it[OVERLAY] ?: true }
               val overlayTouchable: Flow<Boolean> = ds.data.map { it[TOUCHABLE] ?: true }
-              val showCrosshair: Flow<Boolean> = ds.data.map { it[CROSSHAIR] ?: false }
-              val crosshairSize: Flow<Int> = ds.data.map { it[CROSSHAIR_SIZE] ?: 18 }
               val pingHost: Flow<String> = ds.data.map { it[HOST] ?: "1.1.1.1" }
               val baseDpi: Flow<Int> = ds.data.map { it[BASE_DPI] ?: 400 }
               val sensitivityCode: Flow<String> = ds.data.map { it[SENS] ?: "" }
+              val accentColor: Flow<Int> = ds.data.map { it[ACCENT] ?: 0xFFFF2A3C.toInt() }
 
-              suspend fun setGameMode(on: Boolean) = ds.edit { it[GAME_MODE] = on }
-              suspend fun setOverlay(on: Boolean) = ds.edit { it[OVERLAY] = on }
-              suspend fun setTouchable(on: Boolean) = ds.edit { it[TOUCHABLE] = on }
-              suspend fun setCrosshair(on: Boolean) = ds.edit { it[CROSSHAIR] = on }
-              suspend fun setCrosshairSize(px: Int) = ds.edit { it[CROSSHAIR_SIZE] = px }
-              suspend fun setPingHost(h: String) = ds.edit { it[HOST] = h }
-              suspend fun setBaseDpi(d: Int) = ds.edit { it[BASE_DPI] = d }
-              suspend fun setSensitivityCode(c: String) = ds.edit { it[SENS] = c }
+              val crosshairEnabled: Flow<Boolean> = ds.data.map { it[X_ON] ?: false }
+              val crosshairTouchable: Flow<Boolean> = ds.data.map { it[X_TOUCH] ?: true }
+              val crosshairX: Flow<Int> = ds.data.map { it[X_X] ?: 0 }
+              val crosshairY: Flow<Int> = ds.data.map { it[X_Y] ?: 0 }
+              val crosshairShape: Flow<String> = ds.data.map { it[X_SHAPE] ?: "crossdot" }
+              val crosshairColor: Flow<Int> = ds.data.map { it[X_COLOR] ?: 0xFFFF2A3C.toInt() }
+              val crosshairSize: Flow<Int> = ds.data.map { it[X_SIZE] ?: 22 }
+              val crosshairThickness: Flow<Int> = ds.data.map { it[X_THICK] ?: 3 }
+              val crosshairGap: Flow<Int> = ds.data.map { it[X_GAP] ?: 8 }
+              val crosshairDot: Flow<Int> = ds.data.map { it[X_DOT] ?: 3 }
+              val crosshairAlpha: Flow<Int> = ds.data.map { it[X_ALPHA] ?: 220 }
+              val crosshairOutline: Flow<Boolean> = ds.data.map { it[X_OUTLINE] ?: true }
+
+              suspend fun setGameMode(v: Boolean) = ds.edit { it[GAME_MODE] = v }
+              suspend fun setOverlay(v: Boolean) = ds.edit { it[OVERLAY] = v }
+              suspend fun setTouchable(v: Boolean) = ds.edit { it[TOUCHABLE] = v }
+              suspend fun setPingHost(v: String) = ds.edit { it[HOST] = v }
+              suspend fun setBaseDpi(v: Int) = ds.edit { it[BASE_DPI] = v }
+              suspend fun setSensitivityCode(v: String) = ds.edit { it[SENS] = v }
+              suspend fun setAccent(v: Int) = ds.edit { it[ACCENT] = v }
+
+              suspend fun setCrosshairEnabled(v: Boolean) = ds.edit { it[X_ON] = v }
+              suspend fun setCrosshairTouchable(v: Boolean) = ds.edit { it[X_TOUCH] = v }
+              suspend fun setCrosshairPos(x: Int, y: Int) = ds.edit { it[X_X] = x; it[X_Y] = y }
+              suspend fun setCrosshairShape(v: String) = ds.edit { it[X_SHAPE] = v }
+              suspend fun setCrosshairColor(v: Int) = ds.edit { it[X_COLOR] = v }
+              suspend fun setCrosshairSize(v: Int) = ds.edit { it[X_SIZE] = v }
+              suspend fun setCrosshairThickness(v: Int) = ds.edit { it[X_THICK] = v }
+              suspend fun setCrosshairGap(v: Int) = ds.edit { it[X_GAP] = v }
+              suspend fun setCrosshairDot(v: Int) = ds.edit { it[X_DOT] = v }
+              suspend fun setCrosshairAlpha(v: Int) = ds.edit { it[X_ALPHA] = v }
+              suspend fun setCrosshairOutline(v: Boolean) = ds.edit { it[X_OUTLINE] = v }
 
               private companion object {
                   val GAME_MODE = booleanPreferencesKey("game_mode")
                   val OVERLAY = booleanPreferencesKey("overlay")
                   val TOUCHABLE = booleanPreferencesKey("overlay_touchable")
-                  val CROSSHAIR = booleanPreferencesKey("crosshair")
-                  val CROSSHAIR_SIZE = intPreferencesKey("crosshair_size")
                   val HOST = stringPreferencesKey("ping_host")
                   val BASE_DPI = intPreferencesKey("base_dpi")
                   val SENS = stringPreferencesKey("sensitivity")
+                  val ACCENT = intPreferencesKey("accent")
+
+                  val X_ON = booleanPreferencesKey("x_on")
+                  val X_TOUCH = booleanPreferencesKey("x_touch")
+                  val X_X = intPreferencesKey("x_x")
+                  val X_Y = intPreferencesKey("x_y")
+                  val X_SHAPE = stringPreferencesKey("x_shape")
+                  val X_COLOR = intPreferencesKey("x_color")
+                  val X_SIZE = intPreferencesKey("x_size")
+                  val X_THICK = intPreferencesKey("x_thick")
+                  val X_GAP = intPreferencesKey("x_gap")
+                  val X_DOT = intPreferencesKey("x_dot")
+                  val X_ALPHA = intPreferencesKey("x_alpha")
+                  val X_OUTLINE = booleanPreferencesKey("x_outline")
               }
           }
           EOF
 
           cat > "$PKG/data/GameModeState.kt" <<'EOF'
-          package ai.venice.pubgcompanion.data
+          package com.qalbidagx.pubg.data
 
           import kotlinx.coroutines.flow.MutableStateFlow
           import kotlinx.coroutines.flow.StateFlow
-          import ai.venice.pubgcompanion.core.PerfMode
+          import com.qalbidagx.pubg.core.PerfMode
+          import com.qalbidagx.pubg.system.DeviceProfile
+          import com.qalbidagx.pubg.system.SysSnapshot
+          import com.qalbidagx.pubg.system.Tweak
           import java.time.LocalTime
 
           data class LiveStats(
               val fps: Int = 0,
               val fpsIsReal: Boolean = false,
+              val cpuLoad: Int = 0,
+              val cpuMhz: Int = 0,
+              val gpuMhz: Int = 0,
+              val socTempC: Float = 0f,
               val batteryTempC: Float = 0f,
-              val throttling: Boolean = false,
+              val batteryCurrentMa: Int = 0,
               val pingMs: Int = -1,
               val jitterMs: Float = 0f,
               val lossPercent: Float = 0f,
@@ -567,64 +662,50 @@ jobs:
               private val _stats = MutableStateFlow(LiveStats())
               val stats: StateFlow<LiveStats> = _stats
 
+              private val _device = MutableStateFlow<DeviceProfile?>(null)
+              val device: StateFlow<DeviceProfile?> = _device
+
+              private val _tweaks = MutableStateFlow<List<Tweak>>(emptyList())
+              val tweaks: StateFlow<List<Tweak>> = _tweaks
+
+              private val _recording = MutableStateFlow(false)
+              val recording: StateFlow<Boolean> = _recording
+
+              private val _playtime = MutableStateFlow(0L)
+              val playtime: StateFlow<Long> = _playtime
+
               private val _log = MutableStateFlow<List<String>>(emptyList())
               val log: StateFlow<List<String>> = _log
 
               fun setInGame(v: Boolean) { _inGame.value = v }
               fun setProfile(v: String?) { _activeProfile.value = v }
               fun setMode(m: PerfMode?) { _mode.value = m }
+              fun setDevice(d: DeviceProfile?) { _device.value = d }
+              fun setTweaks(t: List<Tweak>) { _tweaks.value = t }
+              fun setRecording(v: Boolean) { _recording.value = v }
+              fun setPlaytime(seconds: Long) { _playtime.value = seconds }
               fun updateStats(block: (LiveStats) -> LiveStats) { _stats.value = block(_stats.value) }
+
+              fun applySys(s: SysSnapshot) {
+                  _stats.value = _stats.value.copy(
+                      cpuLoad = s.cpuLoadPercent,
+                      cpuAvgMhz = s.cpuAvgMhz,
+                      gpuMhz = s.gpuMhz,
+                      socTempC = s.socTempC,
+                      batteryTempC = s.batteryTempC,
+                      batteryCurrentMa = s.batteryCurrentMa,
+                  )
+              }
 
               fun note(msg: String) {
                   val stamp = LocalTime.now().withNano(0).toString()
-                  _log.value = (_log.value + "$stamp  $msg").takeLast(60)
+                  _log.value = (_log.value + "$stamp  $msg").takeLast(80)
               }
-          }
-          EOF
-
-          cat > "$PKG/system/GameDetector.kt" <<'EOF'
-          package ai.venice.pubgcompanion.system
-
-          import android.app.usage.UsageEvents
-          import android.app.usage.UsageStatsManager
-          import android.content.Context
-          import android.os.Build
-          import ai.venice.pubgcompanion.core.GamePackages
-
-          class GameDetector(private val ctx: Context) {
-
-              private val resumedEvent: Int =
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) UsageEvents.Event.ACTIVITY_RESUMED
-                  else UsageEvents.Event.MOVE_TO_FOREGROUND
-
-              fun foregroundPackage(lookbackMs: Long = 20_000L): String? {
-                  val usm = ctx.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager ?: return null
-                  val end = System.currentTimeMillis()
-                  val events = usm.queryEvents(end - lookbackMs, end) ?: return null
-                  val e = UsageEvents.Event()
-                  var pkg: String? = null
-                  var newest = 0L
-                  while (events.hasNextEvent()) {
-                      events.getNextEvent(e)
-                      if (e.eventType == resumedEvent && e.timeStamp >= newest) {
-                          newest = e.timeStamp
-                          pkg = e.packageName
-                      }
-                  }
-                  return pkg
-              }
-
-              fun currentGamePackage(): String? {
-                  val fg = foregroundPackage() ?: return null
-                  return if (GamePackages.ALL.contains(fg)) fg else null
-              }
-
-              fun isGameInForeground(): Boolean = currentGamePackage() != null
           }
           EOF
 
           cat > "$PKG/system/ShizukuShell.kt" <<'EOF'
-          package ai.venice.pubgcompanion.system
+          package com.qalbidagx.pubg.system
 
           import android.content.pm.PackageManager
           import rikka.shizuku.Shizuku
@@ -646,32 +727,45 @@ jobs:
               fun exec(command: String): String? = runCatching {
                   val process = Shizuku.newProcess(arrayOf("sh", "-c", command), null, null)
                   val out = process.inputStream.bufferedReader().use { it.readText() }
+                  val err = process.errorStream.bufferedReader().use { it.readText() }
                   process.waitFor()
-                  out.trim()
+                  (out + err).trim()
               }.getOrNull()
+
+              fun ok(command: String): Boolean =
+                  exec("$command 2>&1 && echo __OK__")?.contains("__OK__") == true
           }
 
           object ResolutionController {
 
               fun apply(width: Int, height: Int, dpi: Int): Boolean =
-                  ShizukuShell.exec("wm size ${width}x$height && wm density $dpi") != null
+                  ShizukuShell.ok("wm size ${width}x$height && wm density $dpi")
 
-              fun reset(): Boolean = ShizukuShell.exec("wm size reset && wm density reset") != null
+              fun reset(): Boolean = ShizukuShell.ok("wm size reset && wm density reset")
           }
 
-          object BackgroundKiller {
+          object ChargeController {
 
-              val PRESETS = listOf(
-                  "com.facebook.katana",
-                  "com.facebook.orca",
-                  "com.instagram.android",
-                  "com.zhiliaoapp.musically",
-                  "com.google.android.apps.maps",
-                  "com.samsung.android.app.spage",
-              )
+              private fun currentMa(): Int? =
+                  runCatching {
+                      java.io.File("/sys/class/power_supply/battery/current_now")
+                          .readText().trim().toLong()
+                  }.getOrNull()?.let { (it / 1000L).toInt() }
 
-              fun kill(packages: List<String> = PRESETS): Int =
-                  packages.count { ShizukuShell.exec("am force-stop $it") != null }
+              fun setBypass(on: Boolean): Pair<Boolean, String> {
+                  val before = currentMa()
+                  val ok = if (on) ShizukuShell.ok("dumpsys battery set ac 0 && dumpsys battery set usb 0")
+                  else ShizukuShell.ok("dumpsys battery reset")
+                  Thread.sleep(1200)
+                  val after = currentMa()
+                  val detail = when {
+                      before == null || after == null -> "current unreadable"
+                      on && after < before -> "current ${before} -> ${after} mA"
+                      !on -> "charger restored"
+                      else -> "no change (${before} mA)"
+                  }
+                  return ok to detail
+              }
           }
 
           object SurfaceFlingerProbe {
@@ -695,17 +789,263 @@ jobs:
           }
           EOF
 
+          cat > "$PKG/system/SysfsProbe.kt" <<'EOF'
+          package com.qalbidagx.pubg.system
+
+          import java.io.File
+
+          data class SysSnapshot(
+              val cpuLoadPercent: Int = 0,
+              val cpuAvgMhz: Int = 0,
+              val gpuMhz: Int = 0,
+              val socTempC: Float = 0f,
+              val batteryTempC: Float = 0f,
+              val batteryCurrentMa: Int = 0,
+          )
+
+          class SysfsProbe {
+
+              private var lastIdle = 0L
+              private var lastTotal = 0L
+
+              private val cpuFreqFiles: List<File> =
+                  (0 until 16).map { File("/sys/devices/system/cpu/cpu$it/cpufreq/scaling_cur_freq") }
+                      .filter { it.exists() }
+
+              private val gpuFreqFiles: List<File> = listOf(
+                  "/sys/class/kgsl/kgsl-3d0/gpuclk",
+                  "/sys/class/kgsl/kgsl-3d0/devfreq/cur_freq",
+                  "/sys/kernel/gpu/gpu_clock",
+              ).map(::File).filter { it.exists() }
+
+              private val thermalFiles: List<File> = runCatching {
+                  File("/sys/class/thermal").listFiles()
+                      ?.filter { it.name.startsWith("thermal_zone") }
+                      ?.map { File(it, "temp") }
+                      ?.filter { it.exists() }
+                      ?: emptyList()
+              }.getOrDefault(emptyList())
+
+              private val battTemp = File("/sys/class/power_supply/battery/temp")
+              private val battCurrent = File("/sys/class/power_supply/battery/current_now")
+
+              fun snapshot(): SysSnapshot {
+                  val freqs = cpuFreqFiles.mapNotNull { read(it) }
+                  val gpu = gpuFreqFiles.firstNotNullOfOrNull { read(it) } ?: 0L
+                  val socTemp = thermalFiles.mapNotNull { read(it) }
+                      .maxOrNull()?.let { it / 1000f } ?: 0f
+                  return SysSnapshot(
+                      cpuLoadPercent = cpuLoad(),
+                      cpuAvgMhz = if (freqs.isEmpty()) 0 else (freqs.average() / 1000).toInt(),
+                      gpuMhz = (gpu / 1_000_000L).toInt(),
+                      socTempC = socTemp,
+                      batteryTempC = (read(battTemp) ?: 0L) / 10f,
+                      batteryCurrentMa = ((read(battCurrent) ?: 0L) / 1000L).toInt(),
+                  )
+              }
+
+              private fun read(f: File): Long? =
+                  runCatching { f.readText().trim().toLong() }.getOrNull()
+
+              private fun cpuLoad(): Int {
+                  val line = runCatching {
+                      File("/proc/stat").useLines { s -> s.firstOrNull { it.startsWith("cpu ") } }
+                  }.getOrNull() ?: return 0
+                  val p = line.trim().split(Regex("\\s+")).drop(1).mapNotNull { it.toLongOrNull() }
+                  if (p.size < 5) return 0
+                  val idle = p[3] + p[4]
+                  val total = p.sum()
+                  val dIdle = idle - lastIdle
+                  val dTotal = total - lastTotal
+                  lastIdle = idle
+                  lastTotal = total
+                  if (dTotal <= 0L) return 0
+                  return ((dTotal - dIdle) * 100 / dTotal).toInt().coerceIn(0, 100)
+              }
+          }
+          EOF
+
+          cat > "$PKG/system/DeviceProfiler.kt" <<'EOF'
+          package com.qalbidagx.pubg.system
+
+          import java.io.File
+
+          data class DeviceProfile(
+              val soc: String,
+              val board: String,
+              val gpuPath: String?,
+              val cores: Int,
+              val bigCores: List<Int>,
+              val maxRefreshHz: Int,
+              val samsung: Boolean,
+              val thermalZones: Int,
+              val tasksetAvailable: Boolean,
+              val chrtAvailable: Boolean,
+          ) {
+              val clusterMaskHex: String
+                  get() = java.lang.Long.toHexString(
+                      bigCores.fold(0L) { acc, c -> acc or (1L shl c) }
+                  )
+          }
+
+          object DeviceProfiler {
+
+              private fun prop(name: String) = ShizukuShell.exec("getprop $name")?.trim().orEmpty()
+
+              private fun readLong(path: String): Long =
+                  ShizukuShell.exec("cat $path 2>/dev/null")?.trim()?.toLongOrNull() ?: 0L
+
+              private fun coreIndexes(): List<Int> =
+                  ShizukuShell.exec("ls -d /sys/devices/system/cpu/cpu[0-9]* 2>/dev/null")
+                      ?.lines()
+                      ?.mapNotNull { it.substringAfterLast("cpu").toIntOrNull() }
+                      ?.sorted()
+                      ?: (0 until Runtime.getRuntime().availableProcessors()).toList()
+
+              private fun gpuPath(): String? = listOf(
+                  "/sys/class/kgsl/kgsl-3d0/devfreq/governor",
+                  "/sys/kernel/gpu/gpu_governor",
+                  "/sys/devices/platform/soc/soc:gpu/devfreq/governor",
+                  "/sys/devices/platform/*.mali/devfreq/governor",
+              ).firstOrNull { ShizukuShell.exec("test -e $it && echo y") == "y" }
+
+              private fun maxRefresh(): Int {
+                  val out = ShizukuShell.exec(
+                      "dumpsys display 2>/dev/null | grep -oE 'fps=[0-9]+' | sed 's/fps=//' | sort -n | tail -1"
+                  )
+                  return out?.trim()?.toIntOrNull()?.coerceIn(60, 240) ?: 60
+              }
+
+              private fun has(bin: String) = ShizukuShell.ok("command -v $bin")
+
+              fun profile(): DeviceProfile {
+                  val all = coreIndexes()
+                  val freqs = all.associateWith {
+                      readLong("/sys/devices/system/cpu/cpu$it/cpufreq/cpuinfo_max_freq")
+                  }
+                  val top = freqs.values.maxOrNull() ?: 0L
+                  var big = if (top <= 0L) emptyList()
+                  else freqs.filter { it.value == top }.keys.sorted()
+                  if (big.isEmpty()) big = all.takeLast((all.size / 2).coerceAtLeast(1)).sorted()
+                  return DeviceProfile(
+                      soc = prop("ro.soc.model")
+                          .ifBlank { prop("ro.board.platform") }
+                          .ifBlank { prop("ro.hardware") },
+                      board = prop("ro.product.board"),
+                      gpuPath = gpuPath(),
+                      cores = all.size,
+                      bigCores = big,
+                      maxRefreshHz = maxRefresh(),
+                      samsung = prop("ro.product.manufacturer").contains("samsung", true),
+                      thermalZones = runCatching {
+                          File("/sys/class/thermal").listFiles()
+                              ?.count { it.name.startsWith("thermal_zone") } ?: 0
+                      }.getOrDefault(0),
+                      tasksetAvailable = has("taskset"),
+                      chrtAvailable = has("chrt"),
+                  )
+              }
+          }
+          EOF
+
+          cat > "$PKG/system/ProcessTuner.kt" <<'EOF'
+          package com.qalbidagx.pubg.system
+
+          import com.qalbidagx.pubg.data.GameModeState
+
+          object ProcessTuner {
+
+              private var lastReport = ""
+
+              fun pids(pkg: String): List<Int> =
+                  ShizukuShell.exec("pidof $pkg")?.trim()
+                      ?.split(" ")?.mapNotNull { it.toIntOrNull() } ?: emptyList()
+
+              fun apply(pkg: String, profile: DeviceProfile, pin: Boolean, boost: Boolean): List<String> {
+                  val out = mutableListOf<String>()
+                  val targets = pids(pkg)
+                  if (targets.isEmpty()) {
+                      out += "game process not found"
+                      return out
+                  }
+
+                  if (pin && profile.tasksetAvailable) {
+                      var hits = 0
+                      for (pid in targets) {
+                          if (ShizukuShell.ok("taskset -p ${profile.clusterMaskHex} $pid")) hits++
+                      }
+                      out += if (hits > 0) "pinned $hits to cores ${profile.bigCores}"
+                      else "taskset denied (CAP_SYS_NICE)"
+                  }
+
+                  if (boost) {
+                      val main = targets.first()
+                      out += if (ShizukuShell.ok("renice -n -10 -p $main")) "renice -10 ok" else "renice denied"
+                      if (profile.chrtAvailable) {
+                          out += if (ShizukuShell.ok("chrt -f -p 1 $main")) "fifo ok" else "chrt denied"
+                      }
+                  }
+
+                  return out
+              }
+
+              fun report(pkg: String): String {
+                  val targets = pids(pkg)
+                  if (targets.isEmpty()) return "not running"
+                  val main = targets.first()
+                  val mask = ShizukuShell.exec("taskset -p $main 2>/dev/null")
+                      ?.substringAfter("affinity list:", "?")?.trim()
+                  val nice = ShizukuShell.exec("cat /proc/$main/stat 2>/dev/null")
+                      ?.split(" ")?.getOrNull(18)?.trim()
+                  return "pid $main  affinity ${mask ?: "?"}  nice ${nice ?: "?"}"
+              }
+
+              fun noteIfChanged(pkg: String) {
+                  val r = report(pkg)
+                  if (r != lastReport) {
+                      lastReport = r
+                      GameModeState.note("Game process: $r")
+                  }
+              }
+          }
+          EOF
+
+          cat > "$PKG/system/ThermalReader.kt" <<'EOF'
+          package com.qalbidagx.pubg.system
+
+          import java.io.File
+
+          object ThermalReader {
+
+              private val zones: List<Pair<String, File>> = runCatching {
+                  File("/sys/class/thermal").listFiles()
+                      ?.filter { it.name.startsWith("thermal_zone") }
+                      ?.mapNotNull { dir ->
+                          val name = runCatching { File(dir, "type").readText().trim() }.getOrNull()
+                          val temp = File(dir, "temp")
+                          if (name.isNullOrBlank() || !temp.exists()) null else name to temp
+                      }
+                      ?: emptyList()
+              }.getOrDefault(emptyList())
+
+              fun hottest(): Pair<String, Float>? = zones
+                  .mapNotNull { (name, file) ->
+                      val raw = runCatching { file.readText().trim().toLong() }.getOrNull()
+                          ?: return@mapNotNull null
+                      val celsius = if (raw > 1000L) raw / 1000f else raw.toFloat()
+                      if (celsius <= 0f || celsius > 120f) null else name to celsius
+                  }
+                  .maxByOrNull { it.second }
+
+              fun zoneNames(): List<String> = zones.map { it.first }
+          }
+          EOF
+
           cat > "$PKG/system/SystemControllers.kt" <<'EOF'
-          package ai.venice.pubgcompanion.system
+          package com.qalbidagx.pubg.system
 
           import android.app.NotificationManager
-          import android.content.BroadcastReceiver
           import android.content.Context
-          import android.content.Intent
-          import android.content.IntentFilter
-          import android.os.BatteryManager
-          import android.os.Build
-          import android.os.PowerManager
           import android.provider.Settings
           import kotlinx.coroutines.*
           import kotlin.math.sqrt
@@ -777,46 +1117,6 @@ jobs:
               }
           }
 
-          class ThermalMonitor(
-              private val ctx: Context,
-              private val onReading: (tempC: Float, throttling: Boolean) -> Unit,
-          ) {
-
-              private var receiver: BroadcastReceiver? = null
-              private var lastTemp = 0f
-              private val power: PowerManager by lazy {
-                  ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
-              }
-
-              private val statusListener = PowerManager.OnThermalStatusChangedListener { status ->
-                  onReading(lastTemp, status >= PowerManager.THERMAL_STATUS_MODERATE)
-              }
-
-              fun start() {
-                  val r = object : BroadcastReceiver() {
-                      override fun onReceive(c: Context, i: Intent) {
-                          lastTemp = i.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0) / 10f
-                          val status = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
-                              power.currentThermalStatus else PowerManager.THERMAL_STATUS_NONE
-                          onReading(lastTemp, status >= PowerManager.THERMAL_STATUS_MODERATE)
-                      }
-                  }
-                  receiver = r
-                  ctx.registerReceiver(r, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                      runCatching { power.addThermalStatusListener(statusListener) }
-                  }
-              }
-
-              fun stop() {
-                  receiver?.let { runCatching { ctx.unregisterReceiver(it) } }
-                  receiver = null
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                      runCatching { power.removeThermalStatusListener(statusListener) }
-                  }
-              }
-          }
-
           class NetworkMonitor(
               private val host: String,
               private val onSample: (rttMs: Int, jitterMs: Float, lossPercent: Float) -> Unit,
@@ -862,13 +1162,38 @@ jobs:
           EOF
 
           cat > "$PKG/system/PerfTuner.kt" <<'EOF'
-          package ai.venice.pubgcompanion.system
+          package com.qalbidagx.pubg.system
 
           import android.content.Context
           import android.provider.Settings
-          import ai.venice.pubgcompanion.core.PerfMode
+          import com.qalbidagx.pubg.core.PerfMode
+
+          data class Tweak(val name: String, val ok: Boolean, val detail: String)
 
           object PerfTuner {
+
+              val RESTRICT = listOf(
+                  "com.facebook.katana",
+                  "com.facebook.system",
+                  "com.facebook.appmanager",
+                  "com.facebook.services",
+                  "com.instagram.android",
+                  "com.zhiliaoapp.musically",
+                  "com.google.android.apps.maps",
+                  "com.samsung.android.app.spage",
+                  "com.samsung.android.arzone",
+                  "com.google.android.apps.tachyon",
+                  "com.google.android.videos",
+                  "com.google.android.apps.docs",
+              )
+
+              val FORCE_STOP = listOf(
+                  "com.facebook.katana",
+                  "com.instagram.android",
+                  "com.zhiliaoapp.musically",
+                  "com.google.android.apps.maps",
+                  "com.samsung.android.app.spage",
+              )
 
               data class Snapshot(
                   val windowAnim: Float,
@@ -877,38 +1202,29 @@ jobs:
                   val touchSensitivity: Int,
                   val screenTimeout: Int,
                   val enhancedCpu: Int?,
+                  val wifiScan: Int?,
                   val fixedPerformance: Boolean?,
                   val thermalStatus: Int?,
                   val governors: Map<Int, String>,
+                  val gpuGovernor: String?,
               )
 
-              private fun cpuPath(core: Int) = "/sys/devices/system/cpu/cpu$core/cpufreq/scaling_governor"
-
-              private val GPU_PATHS = listOf(
-                  "/sys/class/kgsl/kgsl-3d0/devfreq/governor",
-                  "/sys/kernel/gpu/gpu_governor",
-                  "/sys/devices/platform/soc/soc:gpu/devfreq/governor",
-              )
-
-              fun totalCores(): Int =
-                  ShizukuShell.exec("ls -d /sys/devices/system/cpu/cpu[0-9]*")
-                      ?.lines()?.count { it.isNotBlank() }
-                      ?: Runtime.getRuntime().availableProcessors()
-
-              private fun read(path: String): String? =
+              private fun read(path: String) =
                   ShizukuShell.exec("cat $path 2>/dev/null")?.trim()?.ifBlank { null }
 
               private fun write(path: String, value: String): Boolean =
-                  ShizukuShell.exec("echo $value > $path 2>/dev/null && echo ok")?.contains("ok") == true
-
-              private fun gpuPath(): String? =
-                  GPU_PATHS.firstOrNull { ShizukuShell.exec("test -e $it && echo y") == "y" }
+                  ShizukuShell.ok("echo $value > $path")
 
               private fun putGlobal(key: String, value: Any) {
                   ShizukuShell.exec("settings put global $key $value")
               }
 
-              fun snapshot(ctx: Context, cores: Int): Snapshot = Snapshot(
+              private fun globalInt(key: String): Int? =
+                  ShizukuShell.exec("settings get global $key")?.trim()?.toIntOrNull()
+
+              private fun govPath(core: Int) = "/sys/devices/system/cpu/cpu$core/cpufreq/scaling_governor"
+
+              fun snapshot(ctx: Context, device: DeviceProfile): Snapshot = Snapshot(
                   windowAnim = Settings.Global.getFloat(ctx.contentResolver, "window_animation_scale", 1f),
                   transitionAnim = Settings.Global.getFloat(ctx.contentResolver, "transition_animation_scale", 1f),
                   animatorAnim = Settings.Global.getFloat(ctx.contentResolver, "animator_duration_scale", 1f),
@@ -916,62 +1232,90 @@ jobs:
                   screenTimeout = Settings.System.getInt(
                       ctx.contentResolver, Settings.System.SCREEN_OFF_TIMEOUT, 30_000
                   ),
-                  enhancedCpu = ShizukuShell.exec("settings get global sem_enhanced_cpu_responsiveness")
-                      ?.trim()?.toIntOrNull(),
+                  enhancedCpu = globalInt("sem_enhanced_cpu_responsiveness"),
+                  wifiScan = globalInt("wifi_scan_always_enabled"),
                   fixedPerformance = ShizukuShell.exec("cmd power get-fixed-performance-mode-enabled")
                       ?.contains("true"),
                   thermalStatus = ShizukuShell.exec("cmd thermalservice get-current-thermal-status")
                       ?.trim()?.toIntOrNull(),
-                  governors = (0 until cores).associateWith { read(cpuPath(it)) ?: "?" },
+                  governors = (0 until device.cores).associateWith { read(govPath(it)) ?: "?" },
+                  gpuGovernor = device.gpuPath?.let { read(it) },
               )
 
-              fun apply(ctx: Context, mode: PerfMode, cores: Int): List<String> {
-                  val out = mutableListOf<String>()
+              fun apply(ctx: Context, mode: PerfMode, device: DeviceProfile): List<Tweak> {
+                  val r = mutableListOf<Tweak>()
+
+                  mode.cpuGovernor?.let { gov ->
+                      val hits = (0 until device.cores).count { write(govPath(it), gov) }
+                      r += if (hits == 0) Tweak("CPU governor", false, "kernel locked, needs root")
+                      else Tweak("CPU governor", true, "$gov on $hits/${device.cores} cores")
+                  }
+
+                  mode.gpuGovernor?.let { gov ->
+                      val path = device.gpuPath
+                      if (path == null) r += Tweak("GPU governor", false, "no devfreq node")
+                      else {
+                          val ok = write(path, gov)
+                          r += Tweak("GPU governor", ok, if (ok) gov else "write denied")
+                      }
+                  }
+
+                  if (mode.fixedPerformance) {
+                      val ok = ShizukuShell.ok("cmd power set-fixed-performance-mode-enabled true")
+                      r += Tweak("Fixed performance mode", ok, if (ok) "enabled" else "unsupported")
+                  }
+
+                  if (mode.thermalOverride) {
+                      val ok = ShizukuShell.ok("cmd thermalservice override-status 0")
+                      r += Tweak("Thermal override", ok, if (ok) "throttling disabled" else "unsupported")
+                  }
 
                   putGlobal("window_animation_scale", mode.animationScale)
                   putGlobal("transition_animation_scale", mode.animationScale)
                   putGlobal("animator_duration_scale", mode.animationScale)
-                  out += "Animation scale ${mode.animationScale}x"
+                  r += Tweak("Animation scales", true, "${mode.animationScale}x")
 
                   Settings.System.putInt(
                       ctx.contentResolver, Settings.System.SCREEN_OFF_TIMEOUT, 10 * 60_000
                   )
-                  out += "Screen timeout 10 min"
+                  r += Tweak("Screen timeout", true, "10 min")
 
                   if (mode.touchBoost) {
                       Settings.System.putInt(ctx.contentResolver, "touch_sensitivity", 1)
-                      out += "Touch sensitivity on"
+                      val v = Settings.System.getInt(ctx.contentResolver, "touch_sensitivity", 0) == 1
+                      r += Tweak("Touch sensitivity", v, if (v) "on" else "key missing")
                   }
 
-                  if (mode.enhancedCpu) {
+                  if (mode.enhancedCpu && device.samsung) {
                       putGlobal("sem_enhanced_cpu_responsiveness", 1)
-                      out += "Enhanced CPU responsiveness on"
+                      r += Tweak(
+                          "Enhanced CPU response",
+                          globalInt("sem_enhanced_cpu_responsiveness") == 1,
+                          "Samsung key"
+                      )
                   }
 
-                  mode.cpuGovernor?.let { gov ->
-                      val hits = (0 until cores).count { write(cpuPath(it), gov) }
-                      out += if (hits > 0) "CPU governor $gov on $hits/$cores cores"
-                      else "CPU governor locked by kernel"
-                  }
+                  putGlobal("wifi_scan_always_enabled", 0)
+                  r += Tweak("Background wifi scanning", true, "off")
 
-                  mode.gpuGovernor?.let { gov ->
-                      gpuPath()?.let { if (write(it, gov)) out += "GPU governor $gov" }
+                  var restricted = 0
+                  for (p in RESTRICT) {
+                      if (ShizukuShell.ok("cmd appops set $p RUN_IN_BACKGROUND ignore")) restricted++
+                      ShizukuShell.exec("cmd appops set $p RUN_ANY_IN_BACKGROUND ignore")
+                      ShizukuShell.exec("cmd activity set-inactive $p true")
                   }
+                  r += Tweak("Background apps restricted", restricted > 0, "$restricted packages")
 
-                  if (mode.fixedPerformance && ShizukuShell.hasPermission()) {
-                      ShizukuShell.exec("cmd power set-fixed-performance-mode-enabled true")
-                      out += "Fixed performance mode on"
-                  }
+                  val killed = FORCE_STOP.count { ShizukuShell.ok("am force-stop $it") }
+                  r += Tweak("Force stopped", true, "$killed apps")
 
-                  if (mode.thermalOverride && ShizukuShell.hasPermission()) {
-                      ShizukuShell.exec("cmd thermalservice override-status 0")
-                      out += "Thermal throttling disabled"
-                  }
+                  ShizukuShell.exec("pm trim-caches 500G")
+                  r += Tweak("Cache trimmed", true, "done")
 
-                  return out
+                  return r
               }
 
-              fun restore(ctx: Context, snap: Snapshot) {
+              fun restore(ctx: Context, snap: Snapshot, device: DeviceProfile) {
                   putGlobal("window_animation_scale", snap.windowAnim)
                   putGlobal("transition_animation_scale", snap.transitionAnim)
                   putGlobal("animator_duration_scale", snap.animatorAnim)
@@ -980,36 +1324,53 @@ jobs:
                   )
                   Settings.System.putInt(ctx.contentResolver, "touch_sensitivity", snap.touchSensitivity)
                   snap.enhancedCpu?.let { putGlobal("sem_enhanced_cpu_responsiveness", it) }
-                  snap.governors.forEach { (core, gov) -> if (gov != "?") write(cpuPath(core), gov) }
+                  snap.wifiScan?.let { putGlobal("wifi_scan_always_enabled", it) }
+                  snap.governors.forEach { (core, gov) -> if (gov != "?") write(govPath(core), gov) }
+                  if (device.gpuPath != null && snap.gpuGovernor != null) {
+                      write(device.gpuPath, snap.gpuGovernor)
+                  }
                   snap.fixedPerformance?.let {
                       ShizukuShell.exec("cmd power set-fixed-performance-mode-enabled $it")
                   }
                   snap.thermalStatus?.let {
                       ShizukuShell.exec("cmd thermalservice override-status $it")
                   }
+                  for (p in RESTRICT) {
+                      ShizukuShell.exec("cmd appops set $p RUN_IN_BACKGROUND allow")
+                      ShizukuShell.exec("cmd activity set-inactive $p false")
+                  }
               }
 
-              fun aotCompile(pkg: String): String =
-                  ShizukuShell.exec("cmd package compile -m speed -f $pkg")?.takeIf { it.isNotBlank() }
-                      ?: "Compile finished"
+              fun aotCompile(pkg: String): Tweak {
+                  val out = ShizukuShell.exec("cmd package compile -m speed -f $pkg")
+                  return Tweak("AOT compile", true, out?.take(60) ?: "done")
+              }
+
+              fun dexopt(): Tweak {
+                  ShizukuShell.exec("cmd package bg-dexopt-job")
+                  return Tweak("Dexopt", true, "queued")
+              }
           }
           EOF
 
           cat > "$PKG/service/Notifier.kt" <<'EOF'
-          package ai.venice.pubgcompanion.service
+          package com.qalbidagx.pubg.service
 
           import android.app.Notification
           import android.app.NotificationChannel
           import android.app.NotificationManager
+          import android.app.PendingIntent
           import android.content.Context
+          import android.content.Intent
           import android.os.Build
           import androidx.core.app.NotificationCompat
-          import ai.venice.pubgcompanion.R
+          import com.qalbidagx.pubg.R
 
           object Notifier {
 
               const val CH_GAME = "game_mode"
               const val CH_OVERLAY = "overlay"
+              const val CH_RECORD = "record"
 
               fun ensureChannels(ctx: Context) {
                   if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -1021,6 +1382,11 @@ jobs:
                   )
                   nm.createNotificationChannel(
                       NotificationChannel(CH_OVERLAY, "Overlay", NotificationManager.IMPORTANCE_MIN).apply {
+                          setShowBadge(false)
+                      }
+                  )
+                  nm.createNotificationChannel(
+                      NotificationChannel(CH_RECORD, "Recording", NotificationManager.IMPORTANCE_LOW).apply {
                           setShowBadge(false)
                       }
                   )
@@ -1036,224 +1402,370 @@ jobs:
                       .setPriority(NotificationCompat.PRIORITY_LOW)
                       .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
                       .build()
+
+              fun recording(ctx: Context): Notification {
+                  val stop = PendingIntent.getService(
+                      ctx, 11,
+                      Intent(ctx, RecorderService::class.java).setAction(RecorderService.ACTION_STOP),
+                      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                  )
+                  return NotificationCompat.Builder(ctx, CH_RECORD)
+                      .setSmallIcon(R.drawable.ic_stat_companion)
+                      .setContentTitle("QalbiDagx is recording")
+                      .setContentText("Tap the floating button to stop")
+                      .setOngoing(true)
+                      .setPriority(NotificationCompat.PRIORITY_LOW)
+                      .addAction(0, "Stop", stop)
+                      .build()
+              }
           }
           EOF
 
-          cat > "$PKG/service/GameModeService.kt" <<'EOF'
-          package ai.venice.pubgcompanion.service
+          cat > "$PKG/service/CrosshairView.kt" <<'EOF'
+          package com.qalbidagx.pubg.service
 
-          import android.app.NotificationManager
+          import android.content.Context
+          import android.graphics.*
+          import android.view.View
+          import com.qalbidagx.pubg.data.CrosshairStyle
+
+          class CrosshairView(context: Context) : View(context) {
+
+              var crosshair: CrosshairStyle = CrosshairStyle()
+                  set(value) {
+                      field = value
+                      requestLayout()
+                      invalidate()
+                  }
+
+              private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+              private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+              private val outline = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+
+              override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+                  val reach = crosshair.gapPx + crosshair.sizePx + crosshair.thicknessPx * 3
+                  val side = (reach * 2).coerceAtLeast(crosshair.dotRadiusPx * 8).coerceAtLeast(48)
+                  setMeasuredDimension(side, side)
+              }
+
+              override fun onDraw(canvas: Canvas) {
+                  val cx = width / 2f
+                  val cy = height / 2f
+                  val c = crosshair.color
+                  val a = crosshair.alpha
+                  val argb = Color.argb(a, Color.red(c), Color.green(c), Color.blue(c))
+
+                  stroke.color = argb
+                  fill.color = argb
+                  stroke.strokeWidth = crosshair.thicknessPx.toFloat()
+                  outline.strokeWidth = crosshair.thicknessPx + 2f
+                  outline.color = Color.argb((a * 0.55f).toInt(), 0, 0, 0)
+
+                  val gap = crosshair.gapPx.toFloat()
+                  val len = crosshair.sizePx.toFloat()
+
+                  fun line(x1: Float, y1: Float, x2: Float, y2: Float) {
+                      if (crosshair.outline) canvas.drawLine(x1, y1, x2, y2, outline)
+                      canvas.drawLine(x1, y1, x2, y2, stroke)
+                  }
+
+                  fun circle(radius: Float) {
+                      if (crosshair.outline) canvas.drawCircle(cx, cy, radius, outline)
+                      canvas.drawCircle(cx, cy, radius, stroke)
+                  }
+
+                  fun arms() {
+                      line(cx - gap - len, cy, cx - gap, cy)
+                      line(cx + gap, cy, cx + gap + len, cy)
+                      line(cx, cy - gap - len, cx, cy - gap)
+                      line(cx, cy + gap, cx, cy + gap + len)
+                  }
+
+                  fun dot() {
+                      if (crosshair.outline) {
+                          canvas.drawCircle(cx, cy, crosshair.dotRadiusPx + 1.6f, outline)
+                      }
+                      canvas.drawCircle(cx, cy, crosshair.dotRadiusPx.toFloat(), fill)
+                  }
+
+                  when (crosshair.shape) {
+                      "dot" -> dot()
+                      "circle" -> circle(gap + len / 2f)
+                      "cross" -> arms()
+                      "tee" -> {
+                          line(cx - gap - len, cy, cx - gap, cy)
+                          line(cx + gap, cy, cx + gap + len, cy)
+                          line(cx, cy + gap, cx, cy + gap + len)
+                      }
+                      "chevron" -> {
+                          val p = Path()
+                          p.moveTo(cx - len, cy + len / 2f)
+                          p.lineTo(cx, cy - len / 2f)
+                          p.lineTo(cx + len, cy + len / 2f)
+                          if (crosshair.outline) canvas.drawPath(p, outline)
+                          canvas.drawPath(p, stroke)
+                      }
+                      else -> {
+                          circle(gap + len / 2f)
+                          arms()
+                          dot()
+                      }
+                  }
+              }
+          }
+          EOF
+
+          cat > "$PKG/service/RecorderService.kt" <<'EOF'
+          package com.qalbidagx.pubg.service
+
           import android.app.Service
           import android.content.Context
           import android.content.Intent
+          import android.content.pm.ServiceInfo
+          import android.graphics.*
+          import android.hardware.display.DisplayManager
+          import android.hardware.display.VirtualDisplay
+          import android.media.MediaRecorder
+          import android.media.projection.MediaProjection
+          import android.media.projection.MediaProjectionManager
+          import android.os.Build
           import android.os.IBinder
-          import android.provider.Settings
+          import android.view.Gravity
+          import android.view.MotionEvent
+          import android.view.View
+          import android.view.WindowManager
           import androidx.core.content.ContextCompat
-          import ai.venice.pubgcompanion.core.GamePackages
-          import ai.venice.pubgcompanion.core.PerfMode
-          import ai.venice.pubgcompanion.data.*
-          import ai.venice.pubgcompanion.system.*
-          import kotlinx.coroutines.*
+          import com.qalbidagx.pubg.data.GameModeState
+          import java.io.File
 
-          class GameModeService : Service() {
+          class RecorderService : Service() {
 
-              private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-              private lateinit var detector: GameDetector
-              private lateinit var repo: ProfileRepository
-
-              private var thermal: ThermalMonitor? = null
-              private var activeProfile: Profile? = null
-              private var snapshot: Snapshot? = null
-              private var perfSnapshot: PerfTuner.Snapshot? = null
-              private var thermalDowngraded = false
-              private var fpsJob: Job? = null
-
-              private data class Snapshot(
-                  val brightnessRaw: Int,
-                  val autoBrightness: Boolean,
-                  val peakHz: Float,
-                  val minHz: Float,
-              )
+              private var projection: MediaProjection? = null
+              private var recorder: MediaRecorder? = null
+              private var display: VirtualDisplay? = null
+              private var wm: WindowManager? = null
+              private var button: View? = null
+              private var outputPath = ""
 
               override fun onCreate() {
                   super.onCreate()
-                  detector = GameDetector(this)
-                  repo = ProfileRepository(AppDatabase.get(this).profiles())
-                  startForeground(
-                      NOTIF_ID,
-                      Notifier.build(this, Notifier.CH_GAME, "Waiting for PUBG", "No match running")
-                  )
-                  GameModeState.note("Game mode service started")
-                  scope.launch { loop() }
+                  Notifier.ensureChannels(this)
               }
 
-              override fun onStartCommand(intent: Intent?, flags: Int, startId: Int) = START_STICKY
-              override fun onBind(intent: Intent?): IBinder? = null
-
-              private suspend fun loop() {
-                  while (isActive) {
-                      val inGame = detector.isGameInForeground()
-                      if (inGame && activeProfile == null) enterGameMode()
-                      else if (!inGame && activeProfile != null) exitGameMode()
-                      delay(POLL_MS)
+              override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+                  if (intent?.action == ACTION_STOP) {
+                      stopRecording()
+                      return START_NOT_STICKY
                   }
+                  if (recorder == null) startRecording(intent)
+                  return START_STICKY
               }
 
-              private suspend fun enterGameMode() {
-                  val profile = repo.enabled().firstOrNull() ?: return
-                  val mode = PerfMode.fromId(profile.perfMode)
-
-                  snapshot = Snapshot(
-                      brightnessRaw = BrightnessController.currentRaw(this),
-                      autoBrightness = BrightnessController.isAuto(this),
-                      peakHz = RefreshRateController.peak(this),
-                      minHz = RefreshRateController.min(this),
-                  )
-                  activeProfile = profile
-                  thermalDowngraded = false
-                  GameModeState.setInGame(true)
-                  GameModeState.setProfile(profile.name)
-                  GameModeState.setMode(mode)
-                  GameModeState.note("Match started - applying \"${profile.name}\"")
-
-                  val cores = if (ShizukuShell.hasPermission()) PerfTuner.totalCores()
-                  else Runtime.getRuntime().availableProcessors()
-                  perfSnapshot = if (ShizukuShell.hasPermission()) PerfTuner.snapshot(this, cores) else null
-
-                  if (profile.dnd) {
-                      if (DndController.setDnd(this, true)) GameModeState.note("Do Not Disturb on")
-                      else GameModeState.note("Do Not Disturb denied")
-                  }
-                  if (BrightnessController.setManual(this, profile.brightnessPercent)) {
-                      GameModeState.note("Brightness ${profile.brightnessPercent}%")
-                  }
-                  if (RefreshRateController.set(this, profile.refreshRateHz)) {
-                      GameModeState.note("Refresh rate locked to ${profile.refreshRateHz} Hz")
-                  }
-
-                  if (ShizukuShell.hasPermission()) {
-                      PerfTuner.apply(this, mode, cores).forEach { GameModeState.note(it) }
-                  } else {
-                      GameModeState.note("No Shizuku - settings-only tweaks")
-                      if (mode.touchBoost) {
-                          Settings.System.putInt(contentResolver, "touch_sensitivity", 1)
-                      }
-                  }
-
-                  if (profile.lowerResolution) {
-                      if (ShizukuShell.hasPermission()) {
-                          val ok = ResolutionController.apply(
-                              profile.resolutionWidth, profile.resolutionHeight, profile.resolutionDpi
-                          )
-                          GameModeState.note(
-                              if (ok) "Resolution ${profile.resolutionWidth}x${profile.resolutionHeight}"
-                              else "Resolution change failed"
-                          )
-                      } else GameModeState.note("Resolution unchanged (no Shizuku)")
-                  }
-
-                  if (profile.killBackground && ShizukuShell.hasPermission()) {
-                      GameModeState.note("Stopped ${BackgroundKiller.kill()} background apps")
-                  }
-
-                  if (profile.thermalGuard) startThermal(profile)
-                  startOverlay()
-                  startFpsProbe()
-                  updateNotification("Match running", "${profile.name} - ${mode.label}")
-              }
-
-              private suspend fun exitGameMode() {
-                  thermal?.stop(); thermal = null
-                  fpsJob?.cancel(); fpsJob = null
-
-                  snapshot?.let {
-                      BrightnessController.restore(this, it.brightnessRaw, it.autoBrightness)
-                      RefreshRateController.restore(this, it.peakHz, it.minHz)
-                  }
-                  perfSnapshot?.let { PerfTuner.restore(this, it) }
-
-                  if (activeProfile?.lowerResolution == true && ShizukuShell.hasPermission()) {
-                      ResolutionController.reset()
-                      GameModeState.note("Resolution restored")
-                  }
-
-                  DndController.setDnd(this, false)
-                  stopService(Intent(this, OverlayService::class.java))
-
-                  GameModeState.note("Match ended - system restored")
-                  activeProfile = null
-                  snapshot = null
-                  perfSnapshot = null
-                  GameModeState.setInGame(false)
-                  GameModeState.setProfile(null)
-                  GameModeState.setMode(null)
-                  updateNotification("Waiting for PUBG", "No match running")
-              }
-
-              private fun startThermal(profile: Profile) {
-                  thermal = ThermalMonitor(this) { temp, throttling ->
-                      GameModeState.updateStats { it.copy(batteryTempC = temp, throttling = throttling) }
-                      if (throttling && temp >= profile.temperatureLimitC && !thermalDowngraded) {
-                          thermalDowngraded = true
-                          RefreshRateController.set(this, 60)
-                          GameModeState.note("Thermal throttle at %.1f C - locking 60 Hz".format(temp))
-                      }
-                  }.also { it.start() }
-              }
-
-              private fun startFpsProbe() {
-                  if (!ShizukuShell.hasPermission()) {
-                      GameModeState.note("No Shizuku - FPS shown as estimate")
+              @Suppress("DEPRECATION")
+              private fun startRecording(intent: Intent?) {
+                  val code = intent?.getIntExtra(EXTRA_CODE, 0) ?: 0
+                  val data: Intent? = intent?.getParcelableExtra(EXTRA_DATA)
+                  if (data == null) {
+                      stopSelf()
                       return
                   }
-                  val pkg = detector.currentGamePackage() ?: GamePackages.PRIMARY
-                  fpsJob = scope.launch {
-                      while (isActive) {
-                          SurfaceFlingerProbe.fps(pkg)?.let { fps ->
-                              GameModeState.updateStats { it.copy(fps = fps, fpsIsReal = true) }
-                          }
-                          delay(1200L)
+
+                  val notif = Notifier.recording(this)
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                      startForeground(
+                          NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                      )
+                  } else {
+                      startForeground(NOTIF_ID, notif)
+                  }
+
+                  val mpm = getSystemService(MediaProjectionManager::class.java)
+                  projection = runCatching { mpm.getMediaProjection(code, data) }.getOrNull()
+                      ?: run { stopSelf(); return }
+
+                  val dm = resources.displayMetrics
+                  val w = dm.widthPixels
+                  val h = dm.heightPixels
+                  val dpi = dm.densityDpi
+
+                  val dir = File(getExternalFilesDir(null), "recordings").apply { mkdirs() }
+                  outputPath = File(dir, "qalbidagx-${System.currentTimeMillis()}.mp4").absolutePath
+
+                  val withAudio = intent.getBooleanExtra(EXTRA_AUDIO, false)
+
+                  val rec = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) MediaRecorder(this)
+                  else @Suppress("DEPRECATION") MediaRecorder()
+
+                  runCatching {
+                      if (withAudio) {
+                          rec.setAudioSource(MediaRecorder.AudioSource.MIC)
+                          rec.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                      }
+                      rec.setVideoSource(MediaRecorder.VideoSource.SURFACE)
+                      rec.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                      rec.setVideoEncoder(MediaRecorder.VideoEncoder.H264)
+                      rec.setVideoSize(w, h)
+                      rec.setVideoFrameRate(60)
+                      rec.setVideoEncodingBitRate(w * h * 6)
+                      rec.setOutputFile(outputPath)
+                      rec.prepare()
+                  }.onFailure {
+                      GameModeState.note("Recorder prepare failed: ${it.message}")
+                      stopSelf()
+                      return
+                  }
+
+                  display = projection?.createVirtualDisplay(
+                      "qalbidagx-rec", w, h, dpi,
+                      DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                      rec.surface, null, null,
+                  )
+
+                  runCatching { rec.start() }.onFailure {
+                      GameModeState.note("Recorder start failed: ${it.message}")
+                      stopSelf()
+                      return
+                  }
+
+                  recorder = rec
+                  GameModeState.setRecording(true)
+                  GameModeState.note("Recording started")
+                  addButton()
+              }
+
+              private fun stopRecording() {
+                  runCatching { recorder?.stop() }
+                  runCatching { recorder?.reset() }
+                  runCatching { recorder?.release() }
+                  recorder = null
+                  runCatching { display?.release() }
+                  display = null
+                  runCatching { projection?.stop() }
+                  projection = null
+                  removeButton()
+                  GameModeState.setRecording(false)
+                  GameModeState.note("Saved: $outputPath")
+                  stopForeground(STOP_FOREGROUND_REMOVE)
+                  stopSelf()
+              }
+
+              private fun addButton() {
+                  if (button != null) return
+                  val manager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+                  wm = manager
+                  val size = (52 * resources.displayMetrics.density).toInt()
+
+                  val v = object : View(this) {
+                      private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                          color = Color.argb(220, 255, 42, 60)
+                          style = Paint.Style.STROKE
+                          strokeWidth = 6f
+                      }
+                      private val box = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                          color = Color.WHITE
+                          style = Paint.Style.FILL
+                      }
+                      override fun onDraw(canvas: Canvas) {
+                          val r = (size / 2f) - 8f
+                          canvas.drawCircle(size / 2f, size / 2f, r, ring)
+                          val s = r * 0.55f
+                          canvas.drawRect(
+                              size / 2f - s / 2f, size / 2f - s / 2f,
+                              size / 2f + s / 2f, size / 2f + s / 2f, box,
+                          )
                       }
                   }
+
+                  val params = WindowManager.LayoutParams(
+                      size, size,
+                      WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                          WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                      PixelFormat.TRANSLUCENT,
+                  ).apply {
+                      gravity = Gravity.TOP or Gravity.START
+                      x = 24
+                      y = 24
+                  }
+
+                  var downX = 0; var downY = 0; var startX = 0; var startY = 0; var moved = false
+                  v.setOnTouchListener { _, e ->
+                      when (e.actionMasked) {
+                          MotionEvent.ACTION_DOWN -> {
+                              downX = e.rawX.toInt(); downY = e.rawY.toInt()
+                              startX = params.x; startY = params.y
+                              moved = false
+                              true
+                          }
+                          MotionEvent.ACTION_MOVE -> {
+                              if (kotlin.math.abs(e.rawX.toInt() - downX) > 12 ||
+                                  kotlin.math.abs(e.rawY.toInt() - downY) > 12
+                              ) moved = true
+                              params.x = startX + (e.rawX.toInt() - downX)
+                              params.y = startY + (e.rawY.toInt() - downY)
+                              runCatching { manager.updateViewLayout(v, params) }
+                              true
+                          }
+                          MotionEvent.ACTION_UP -> {
+                              if (!moved) {
+                                  ContextCompat.startForegroundService(
+                                      this@RecorderService,
+                                      Intent(this@RecorderService, RecorderService::class.java)
+                                          .setAction(ACTION_STOP),
+                                  )
+                              }
+                              true
+                          }
+                          else -> false
+                      }
+                  }
+
+                  runCatching { manager.addView(v, params) }
+                  button = v
               }
 
-              private fun startOverlay() {
-                  ContextCompat.startForegroundService(this, Intent(this, OverlayService::class.java))
-              }
-
-              private fun updateNotification(title: String, text: String) {
-                  val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                  nm.notify(NOTIF_ID, Notifier.build(this, Notifier.CH_GAME, title, text))
+              private fun removeButton() {
+                  button?.let { b -> wm?.let { runCatching { it.removeView(b) } } }
+                  button = null
+                  wm = null
               }
 
               override fun onDestroy() {
-                  thermal?.stop()
-                  scope.cancel()
-                  GameModeState.note("Game mode service stopped")
+                  if (recorder != null) stopRecording()
                   super.onDestroy()
               }
 
-              private companion object {
-                  const val NOTIF_ID = 1001
-                  const val POLL_MS = 1500L
+              override fun onBind(intent: Intent?): IBinder? = null
+
+              companion object {
+                  const val ACTION_STOP = "com.qalbidagx.pubg.STOP_RECORD"
+                  const val EXTRA_CODE = "code"
+                  const val EXTRA_DATA = "data"
+                  const val EXTRA_AUDIO = "audio"
+                  private const val NOTIF_ID = 1003
               }
           }
           EOF
 
           cat > "$PKG/service/StatsOverlayView.kt" <<'EOF'
-          package ai.venice.pubgcompanion.service
+          package com.qalbidagx.pubg.service
 
           import android.content.Context
           import android.graphics.*
           import android.view.Choreographer
           import android.view.View
-          import ai.venice.pubgcompanion.data.GameModeState
+          import com.qalbidagx.pubg.data.GameModeState
 
           class StatsOverlayView(context: Context) : View(context) {
 
               private val text = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                   color = Color.WHITE
-                  textSize = 32f
+                  textSize = 28f
+                  typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+              }
+              private val dim = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                  color = 0xFF9AA1AC.toInt()
+                  textSize = 28f
                   typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
               }
               private val bg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xE6000000.toInt() }
@@ -1263,6 +1775,7 @@ jobs:
                   strokeWidth = 3f
                   style = Paint.Style.STROKE
               }
+              private val hot = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFF2A3C.toInt() }
 
               private val history = ArrayDeque<Int>()
               private var lastSecond = 0L
@@ -1280,9 +1793,7 @@ jobs:
                           lastSecond = now
                           history.addLast(measured)
                           if (history.size > 40) history.removeFirst()
-                          GameModeState.updateStats { s ->
-                              if (s.fpsIsReal) s else s.copy(fps = measured)
-                          }
+                          GameModeState.updateStats { s -> if (s.fpsIsReal) s else s.copy(fps = measured) }
                           invalidate()
                       }
                       choreographer.postFrameCallback(this)
@@ -1300,23 +1811,26 @@ jobs:
               }
 
               override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-                  setMeasuredDimension(WIDTH_PX, (text.textSize * 1.5f * 4 + 20f + GRAPH_H).toInt())
+                  setMeasuredDimension(WIDTH_PX, (text.textSize * 1.45f * 6 + 18f + GRAPH_H).toInt())
               }
 
               override fun onDraw(canvas: Canvas) {
                   val s = GameModeState.stats.value
                   val rows = listOf(
                       (if (s.fpsIsReal) "" else "~") + s.fps.toString().padStart(3) + " FPS",
-                      "%.1f C".format(s.batteryTempC) + if (s.throttling) "  THR" else "",
-                      if (s.pingMs >= 0) s.pingMs.toString().padStart(3) + " ms" else " -- ms",
-                      "loss %.1f%%".format(s.lossPercent),
+                      "CPU ${s.cpuLoad.toString().padStart(3)}%  ${s.cpuMhz}MHz",
+                      "GPU ${s.gpuMhz}MHz",
+                      "SOC %.1f C".format(s.socTempC),
+                      "BAT %.1f C  %d mA".format(s.batteryTempC, s.batteryCurrentMa),
+                      if (s.pingMs >= 0) "NET ${s.pingMs}ms  jit %.0f  %.0f%%"
+                          .format(s.jitterMs, s.lossPercent) else "NET --",
                   )
 
-                  val h = text.textSize * 1.5f * rows.size + 20f + GRAPH_H
+                  val h = text.textSize * 1.45f * rows.size + 18f + GRAPH_H
                   canvas.drawRoundRect(0f, 0f, WIDTH_PX.toFloat(), h, 6f, 6f, bg)
                   canvas.drawRect(0f, 0f, 4f, h, edge)
 
-                  val graphTop = text.textSize * 1.5f * rows.size + 12f
+                  val graphTop = text.textSize * 1.45f * rows.size + 10f
                   if (history.size > 1) {
                       val path = Path()
                       val stepX = WIDTH_PX / history.size.toFloat()
@@ -1330,24 +1844,29 @@ jobs:
                   }
 
                   rows.forEachIndexed { i, t ->
-                      canvas.drawText(t, 16f, 18f + text.textSize + i * text.textSize * 1.5f, text)
+                      val p = when {
+                          i == 3 && s.socTempC >= 43f -> hot
+                          i >= 1 -> dim
+                          else -> text
+                      }
+                      canvas.drawText(t, 16f, 16f + text.textSize + i * text.textSize * 1.45f, p)
                   }
               }
 
               private companion object {
-                  const val WIDTH_PX = 340
-                  const val GRAPH_H = 34f
+                  const val WIDTH_PX = 380
+                  const val GRAPH_H = 30f
               }
           }
           EOF
 
           cat > "$PKG/service/OverlayService.kt" <<'EOF'
-          package ai.venice.pubgcompanion.service
+          package com.qalbidagx.pubg.service
 
           import android.app.Service
           import android.content.Context
           import android.content.Intent
-          import android.graphics.*
+          import android.graphics.PixelFormat
           import android.os.IBinder
           import android.view.Gravity
           import android.view.MotionEvent
@@ -1355,16 +1874,20 @@ jobs:
           import android.view.WindowManager
           import kotlinx.coroutines.*
           import kotlinx.coroutines.flow.first
-          import ai.venice.pubgcompanion.data.GameModeState
-          import ai.venice.pubgcompanion.data.SettingsStore
-          import ai.venice.pubgcompanion.system.NetworkMonitor
+          import com.qalbidagx.pubg.data.CrosshairStyle
+          import com.qalbidagx.pubg.data.GameModeState
+          import com.qalbidagx.pubg.data.SettingsStore
+          import com.qalbidagx.pubg.system.NetworkMonitor
+          import com.qalbidagx.pubg.system.SysfsProbe
 
           class OverlayService : Service() {
 
               private lateinit var wm: WindowManager
               private var statsView: StatsOverlayView? = null
-              private var crosshairView: View? = null
+              private var crosshairView: CrosshairView? = null
               private var net: NetworkMonitor? = null
+              private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+              private val probe = SysfsProbe()
 
               override fun onCreate() {
                   super.onCreate()
@@ -1374,6 +1897,12 @@ jobs:
                   )
                   wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
                   rebuild()
+                  scope.launch {
+                      while (isActive) {
+                          runCatching { GameModeState.applySys(probe.snapshot()) }
+                          delay(1000L)
+                      }
+                  }
               }
 
               override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -1389,16 +1918,29 @@ jobs:
                   net?.stop()
                   net = null
 
-                  val settings = SettingsStore(this)
-                  val showStats = runBlocking { settings.overlayEnabled.first() }
-                  val touchable = runBlocking { settings.overlayTouchable.first() }
-                  val crosshair = runBlocking { settings.showCrosshair.first() }
-                  val crosshairSize = runBlocking { settings.crosshairSize.first() }
+                  val s = SettingsStore(this)
+                  if (runBlocking { s.overlayEnabled.first() }) {
+                      addStats(runBlocking { s.overlayTouchable.first() })
+                  }
+                  if (runBlocking { s.crosshairEnabled.first() }) {
+                      addCrosshair(
+                          style = CrosshairStyle(
+                              shape = runBlocking { s.crosshairShape.first() },
+                              color = runBlocking { s.crosshairColor.first() },
+                              sizePx = runBlocking { s.crosshairSize.first() },
+                              thicknessPx = runBlocking { s.crosshairThickness.first() },
+                              gapPx = runBlocking { s.crosshairGap.first() },
+                              dotRadiusPx = runBlocking { s.crosshairDot.first() },
+                              alpha = runBlocking { s.crosshairAlpha.first() },
+                              outline = runBlocking { s.crosshairOutline.first() },
+                          ),
+                          touchable = runBlocking { s.crosshairTouchable.first() },
+                          startX = runBlocking { s.crosshairX.first() },
+                          startY = runBlocking { s.crosshairY.first() },
+                      )
+                  }
 
-                  if (showStats) addStats(touchable)
-                  if (crosshair) addCrosshair(crosshairSize)
-
-                  val host = runBlocking { settings.pingHost.first() }
+                  val host = runBlocking { s.pingHost.first() }
                   net = NetworkMonitor(host) { rtt, jitter, loss ->
                       GameModeState.updateStats {
                           it.copy(pingMs = rtt, jitterMs = jitter, lossPercent = loss)
@@ -1421,15 +1963,43 @@ jobs:
                   ).apply {
                       gravity = Gravity.TOP or Gravity.START
                       x = 24
-                      y = 140
+                      y = 150
                   }
 
-                  if (touchable) attachDrag(view, params)
+                  if (touchable) attachDrag(view, params) { _, _ -> }
                   wm.addView(view, params)
                   statsView = view
               }
 
-              private fun attachDrag(view: View, params: WindowManager.LayoutParams) {
+              private fun addCrosshair(style: CrosshairStyle, touchable: Boolean, startX: Int, startY: Int) {
+                  val view = CrosshairView(this).apply { crosshair = style }
+                  val flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                      WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                      (if (touchable) 0 else WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
+
+                  val params = WindowManager.LayoutParams(
+                      WindowManager.LayoutParams.WRAP_CONTENT,
+                      WindowManager.LayoutParams.WRAP_CONTENT,
+                      WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                      flags,
+                      PixelFormat.TRANSLUCENT,
+                  ).apply {
+                      gravity = Gravity.TOP or Gravity.START
+                      x = startX
+                      y = startY
+                  }
+
+                  if (touchable) {
+                      attachDrag(view, params) { x, y ->
+                          scope.launch { SettingsStore(this@OverlayService).setCrosshairPos(x, y) }
+                      }
+                  }
+
+                  wm.addView(view, params)
+                  crosshairView = view
+              }
+
+              private fun attachDrag(view: View, params: WindowManager.LayoutParams, onEnd: (Int, Int) -> Unit) {
                   var downX = 0; var downY = 0; var startX = 0; var startY = 0
                   view.setOnTouchListener { _, e ->
                       when (e.actionMasked) {
@@ -1444,41 +2014,17 @@ jobs:
                               runCatching { wm.updateViewLayout(view, params) }
                               true
                           }
+                          MotionEvent.ACTION_UP -> {
+                              onEnd(params.x, params.y)
+                              true
+                          }
                           else -> false
                       }
                   }
               }
 
-              private fun addCrosshair(sizePx: Int) {
-                  val view = object : View(this) {
-                      private val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                          color = Color.argb(215, 255, 42, 60)
-                          strokeWidth = 3f
-                      }
-                      override fun onDraw(canvas: Canvas) {
-                          val cx = width / 2f
-                          val cy = height / 2f
-                          val gap = sizePx / 2f
-                          canvas.drawLine(cx - gap - sizePx, cy, cx - gap, cy, p)
-                          canvas.drawLine(cx + gap, cy, cx + gap + sizePx, cy, p)
-                          canvas.drawLine(cx, cy - gap - sizePx, cx, cy - gap, p)
-                          canvas.drawLine(cx, cy + gap, cx, cy + gap + sizePx, p)
-                      }
-                  }
-                  val params = WindowManager.LayoutParams(
-                      WindowManager.LayoutParams.MATCH_PARENT,
-                      WindowManager.LayoutParams.MATCH_PARENT,
-                      WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                          WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                          WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-                      PixelFormat.TRANSLUCENT,
-                  )
-                  wm.addView(view, params)
-                  crosshairView = view
-              }
-
               override fun onDestroy() {
+                  scope.cancel()
                   net?.stop()
                   statsView?.let { runCatching { wm.removeView(it) } }
                   crosshairView?.let { runCatching { wm.removeView(it) } }
@@ -1491,13 +2037,312 @@ jobs:
           }
           EOF
 
+          cat > "$PKG/system/GameDetector.kt" <<'EOF'
+          package com.qalbidagx.pubg.system
+
+          import android.app.usage.UsageEvents
+          import android.app.usage.UsageStatsManager
+          import android.content.Context
+          import android.os.Build
+          import com.qalbidagx.pubg.core.GamePackages
+
+          class GameDetector(private val ctx: Context) {
+
+              private val resumedEvent: Int =
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) UsageEvents.Event.ACTIVITY_RESUMED
+                  else UsageEvents.Event.MOVE_TO_FOREGROUND
+
+              fun foregroundPackage(lookbackMs: Long = 20_000L): String? {
+                  val usm = ctx.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager ?: return null
+                  val end = System.currentTimeMillis()
+                  val events = usm.queryEvents(end - lookbackMs, end) ?: return null
+                  val e = UsageEvents.Event()
+                  var pkg: String? = null
+                  var newest = 0L
+                  while (events.hasNextEvent()) {
+                      events.getNextEvent(e)
+                      if (e.eventType == resumedEvent && e.timeStamp >= newest) {
+                          newest = e.timeStamp
+                          pkg = e.packageName
+                      }
+                  }
+                  return pkg
+              }
+
+              fun currentGamePackage(): String? {
+                  val fg = foregroundPackage() ?: return null
+                  return if (GamePackages.ALL.contains(fg)) fg else null
+              }
+
+              fun isGameInForeground(): Boolean = currentGamePackage() != null
+          }
+          EOF
+
+          cat > "$PKG/service/GameModeService.kt" <<'EOF'
+          package com.qalbidagx.pubg.service
+
+          import android.app.NotificationManager
+          import android.app.Service
+          import android.content.Context
+          import android.content.Intent
+          import android.os.IBinder
+          import androidx.core.content.ContextCompat
+          import com.qalbidagx.pubg.core.PerfMode
+          import com.qalbidagx.pubg.data.*
+          import com.qalbidagx.pubg.system.*
+          import kotlinx.coroutines.*
+
+          class GameModeService : Service() {
+
+              private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+              private lateinit var detector: GameDetector
+              private lateinit var repo: ProfileRepository
+
+              private var activeProfile: Profile? = null
+              private var device: DeviceProfile? = null
+              private var snapshot: Snapshot? = null
+              private var perfSnapshot: PerfTuner.Snapshot? = null
+              private var thermalJob: Job? = null
+              private var fpsJob: Job? = null
+              private var pinJob: Job? = null
+              private var clockJob: Job? = null
+              private var thermalDowngraded = false
+
+              private data class Snapshot(
+                  val brightnessRaw: Int,
+                  val autoBrightness: Boolean,
+                  val peakHz: Float,
+                  val minHz: Float,
+              )
+
+              override fun onCreate() {
+                  super.onCreate()
+                  detector = GameDetector(this)
+                  repo = ProfileRepository(AppDatabase.get(this).profiles())
+                  startForeground(
+                      NOTIF_ID,
+                      Notifier.build(this, Notifier.CH_GAME, "Waiting for PUBG", "No match running")
+                  )
+                  GameModeState.note("Service started")
+                  scope.launch {
+                      device = runCatching { DeviceProfiler.profile() }.getOrNull()
+                      device?.let {
+                          GameModeState.setDevice(it)
+                          GameModeState.note(
+                              "Device: ${it.soc.ifBlank { "unknown" }}, ${it.cores} cores, " +
+                                  "big ${it.bigCores}, ${it.maxRefreshHz} Hz"
+                          )
+                      }
+                      loop()
+                  }
+              }
+
+              override fun onStartCommand(intent: Intent?, flags: Int, startId: Int) = START_STICKY
+              override fun onBind(intent: Intent?): IBinder? = null
+
+              private suspend fun loop() {
+                  while (isActive) {
+                      val inGame = detector.isGameInForeground()
+                      if (inGame && activeProfile == null) enterGameMode()
+                      else if (!inGame && activeProfile != null) exitGameMode()
+                      delay(POLL_MS)
+                  }
+              }
+
+              private suspend fun enterGameMode() {
+                  val profile = repo.enabled().firstOrNull() ?: return
+                  val dev = device ?: return
+                  val mode = PerfMode.fromId(profile.perfMode)
+                  val maxHz = if (dev.maxRefreshHz > 0) dev.maxRefreshHz else 120
+
+                  snapshot = Snapshot(
+                      brightnessRaw = BrightnessController.currentRaw(this),
+                      autoBrightness = BrightnessController.isAuto(this),
+                      peakHz = RefreshRateController.peak(this),
+                      minHz = RefreshRateController.min(this),
+                  )
+                  activeProfile = profile
+                  thermalDowngraded = false
+                  GameModeState.setInGame(true)
+                  GameModeState.setProfile(profile.name)
+                  GameModeState.setMode(mode)
+                  GameModeState.note("Match detected - applying \"${profile.name}\"")
+
+                  val tweaks = mutableListOf<Tweak>()
+                  perfSnapshot = if (ShizukuShell.hasPermission()) PerfTuner.snapshot(this, dev) else null
+
+                  if (profile.dnd) {
+                      val ok = DndController.setDnd(this, true)
+                      tweaks += Tweak("Do Not Disturb", ok, if (ok) "on" else "access denied")
+                  }
+
+                  val bright = BrightnessController.setManual(this, profile.brightnessPercent)
+                  tweaks += Tweak("Brightness", bright, if (bright) "${profile.brightnessPercent}%" else "denied")
+
+                  val hz = profile.refreshRateHz.coerceAtMost(maxHz)
+                  val rr = RefreshRateController.set(this, hz)
+                  tweaks += Tweak("Refresh rate", rr, if (rr) "$hz Hz locked" else "denied")
+
+                  if (ShizukuShell.hasPermission()) {
+                      tweaks += PerfTuner.apply(this, mode, dev)
+
+                      if (profile.chargeSeparation) {
+                          val (ok, detail) = ChargeController.setBypass(true)
+                          tweaks += Tweak("Charge separation", ok, detail)
+                      }
+
+                      val pkg = detector.currentGamePackage()
+                      if (pkg != null && (profile.pinToBigCores || profile.boostPriority)) {
+                          tweaks += Tweak(
+                              "Process control", true,
+                              ProcessTuner.apply(pkg, dev, profile.pinToBigCores, profile.boostPriority)
+                                  .joinToString("; ")
+                          )
+                      }
+
+                      if (profile.lowerResolution) {
+                          val ok = ResolutionController.apply(
+                              profile.resolutionWidth, profile.resolutionHeight, profile.resolutionDpi
+                          )
+                          tweaks += Tweak(
+                              "Resolution", ok,
+                              if (ok) "${profile.resolutionWidth}x${profile.resolutionHeight}" else "failed"
+                          )
+                      }
+                  } else {
+                      tweaks += Tweak("Shizuku", false, "not granted - settings-only mode")
+                  }
+
+                  GameModeState.setTweaks(tweaks)
+                  tweaks.forEach {
+                      GameModeState.note("${if (it.ok) "OK  " else "FAIL"} ${it.name}: ${it.detail}")
+                  }
+
+                  GameModeState.setPlaytime(0L)
+                  if (profile.thermalGuard) startThermal(profile)
+                  startOverlay()
+                  startFpsProbe()
+                  startPinLoop(profile)
+                  startClock()
+                  updateNotification("Match running", "${profile.name} - ${mode.label}")
+              }
+
+              private suspend fun exitGameMode() {
+                  thermalJob?.cancel(); thermalJob = null
+                  fpsJob?.cancel(); fpsJob = null
+                  pinJob?.cancel(); pinJob = null
+                  clockJob?.cancel(); clockJob = null
+
+                  snapshot?.let {
+                      BrightnessController.restore(this, it.brightnessRaw, it.autoBrightness)
+                      RefreshRateController.restore(this, it.peakHz, it.minHz)
+                  }
+                  perfSnapshot?.let { perf -> device?.let { d -> PerfTuner.restore(this, perf, d) } }
+
+                  if (activeProfile?.chargeSeparation == true && ShizukuShell.hasPermission()) {
+                      ChargeController.setBypass(false)
+                  }
+                  if (activeProfile?.lowerResolution == true && ShizukuShell.hasPermission()) {
+                      ResolutionController.reset()
+                  }
+
+                  DndController.setDnd(this, false)
+                  stopService(Intent(this, OverlayService::class.java))
+
+                  GameModeState.note("Match ended - restored")
+                  activeProfile = null
+                  snapshot = null
+                  perfSnapshot = null
+                  GameModeState.setInGame(false)
+                  GameModeState.setProfile(null)
+                  GameModeState.setMode(null)
+                  updateNotification("Waiting for PUBG", "No match running")
+              }
+
+              private fun startThermal(profile: Profile) {
+                  thermalJob = scope.launch {
+                      while (isActive) {
+                          val hot = ThermalReader.hottest()
+                          if (hot != null) {
+                              GameModeState.updateStats { it.copy(socTempC = hot.second) }
+                              if (hot.second >= profile.temperatureLimitC && !thermalDowngraded) {
+                                  thermalDowngraded = true
+                                  RefreshRateController.set(this@GameModeService, 60)
+                                  GameModeState.note(
+                                      "%.1f C on %s - locked 60 Hz".format(hot.second, hot.first)
+                                  )
+                              }
+                          }
+                          delay(2000L)
+                      }
+                  }
+              }
+
+              private fun startFpsProbe() {
+                  if (!ShizukuShell.hasPermission()) return
+                  fpsJob = scope.launch {
+                      while (isActive) {
+                          detector.currentGamePackage()?.let { pkg ->
+                              SurfaceFlingerProbe.fps(pkg)?.let { fps ->
+                                  GameModeState.updateStats { it.copy(fps = fps, fpsIsReal = true) }
+                              }
+                          }
+                          delay(1200L)
+                      }
+                  }
+              }
+
+              private fun startPinLoop(profile: Profile) {
+                  if (!profile.pinToBigCores) return
+                  pinJob = scope.launch {
+                      while (isActive) {
+                          delay(8000L)
+                          val dev = device ?: continue
+                          val pkg = detector.currentGamePackage() ?: continue
+                          ProcessTuner.apply(pkg, dev, true, false)
+                          ProcessTuner.noteIfChanged(pkg)
+                      }
+                  }
+              }
+
+              private fun startClock() {
+                  clockJob = scope.launch {
+                      while (isActive) {
+                          delay(1000L)
+                          GameModeState.setPlaytime(GameModeState.playtime.value + 1)
+                      }
+                  }
+              }
+
+              private fun startOverlay() {
+                  ContextCompat.startForegroundService(this, Intent(this, OverlayService::class.java))
+              }
+
+              private fun updateNotification(title: String, text: String) {
+                  val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                  nm.notify(NOTIF_ID, Notifier.build(this, Notifier.CH_GAME, title, text))
+              }
+
+              override fun onDestroy() {
+                  scope.cancel()
+                  GameModeState.note("Service stopped")
+                  super.onDestroy()
+              }
+
+              private companion object {
+                  const val NOTIF_ID = 1001
+                  const val POLL_MS = 1500L
+              }
+          }
+          EOF
+
           cat > "$PKG/CompanionApp.kt" <<'EOF'
-          package ai.venice.pubgcompanion
+          package com.qalbidagx.pubg
 
           import android.app.Application
-          import ai.venice.pubgcompanion.data.AppDatabase
-          import ai.venice.pubgcompanion.data.ProfileRepository
-          import ai.venice.pubgcompanion.service.Notifier
+          import com.qalbidagx.pubg.data.AppDatabase
+          import com.qalbidagx.pubg.data.ProfileRepository
+          import com.qalbidagx.pubg.service.Notifier
           import kotlinx.coroutines.*
 
           class CompanionApp : Application() {
@@ -1515,7 +2360,7 @@ jobs:
           EOF
 
           cat > "$PKG/ui/theme/Theme.kt" <<'EOF'
-          package ai.venice.pubgcompanion.ui.theme
+          package com.qalbidagx.pubg.ui.theme
 
           import androidx.compose.foundation.shape.RoundedCornerShape
           import androidx.compose.material3.MaterialTheme
@@ -1527,6 +2372,7 @@ jobs:
 
           val RmRed = Color(0xFFFF2A3C)
           val RmCyan = Color(0xFF00E5FF)
+          val PubgOrange = RmRed
           val Bg0 = Color(0xFF07070A)
           val Bg1 = Color(0xFF101014)
           val Bg2 = Color(0xFF18181E)
@@ -1536,52 +2382,52 @@ jobs:
           val Good = Color(0xFF3DDC84)
           val Bad = RmRed
 
-          private val Colors = darkColorScheme(
-              primary = RmRed,
-              onPrimary = Color.Black,
-              secondary = RmCyan,
-              onSecondary = Color.Black,
-              background = Bg0,
-              onBackground = FgMain,
-              surface = Bg1,
-              onSurface = FgMain,
-              surfaceVariant = Bg2,
-              onSurfaceVariant = FgMuted,
-              outline = Edge,
-              error = Bad,
-          )
-
-          private val RmShapes = Shapes(
-              extraSmall = RoundedCornerShape(2.dp),
-              small = RoundedCornerShape(4.dp),
-              medium = RoundedCornerShape(6.dp),
-              large = RoundedCornerShape(8.dp),
-          )
-
           @Composable
-          fun CompanionTheme(content: @Composable () -> Unit) {
-              MaterialTheme(colorScheme = Colors, shapes = RmShapes, content = content)
+          fun CompanionTheme(accent: Color = RmRed, content: @Composable () -> Unit) {
+              val colors = darkColorScheme(
+                  primary = accent,
+                  onPrimary = Color.Black,
+                  secondary = RmCyan,
+                  onSecondary = Color.Black,
+                  background = Bg0,
+                  onBackground = FgMain,
+                  surface = Bg1,
+                  onSurface = FgMain,
+                  surfaceVariant = Bg2,
+                  onSurfaceVariant = FgMuted,
+                  outline = Edge,
+                  error = Bad,
+              )
+              val shapes = Shapes(
+                  extraSmall = RoundedCornerShape(2.dp),
+                  small = RoundedCornerShape(4.dp),
+                  medium = RoundedCornerShape(6.dp),
+                  large = RoundedCornerShape(8.dp),
+              )
+              MaterialTheme(colorScheme = colors, shapes = shapes, content = content)
           }
           EOF
 
           cat > "$PKG/ui/Nav.kt" <<'EOF'
-          package ai.venice.pubgcompanion.ui
+          package com.qalbidagx.pubg.ui
 
           import androidx.compose.material.icons.Icons
           import androidx.compose.material.icons.filled.*
           import androidx.compose.ui.graphics.vector.ImageVector
 
           enum class Dest(val route: String, val label: String, val icon: ImageVector) {
-              Dashboard("dashboard", "Dashboard", Icons.Filled.Speed),
+              Dashboard("dashboard", "Home", Icons.Filled.Speed),
+              System("system", "System", Icons.Filled.Memory),
               Profiles("profiles", "Profiles", Icons.Filled.Tune),
-              Overlay("overlay", "Overlay", Icons.Filled.Layers),
-              Network("network", "Network", Icons.Filled.Wifi),
-              Sensitivity("sensitivity", "Aim", Icons.Filled.GpsFixed),
+              Overlay("overlay", "Aim", Icons.Filled.CenterFocusStrong),
+              Network("network", "Net", Icons.Filled.Wifi),
+              Sensitivity("sensitivity", "Sens", Icons.Filled.GpsFixed),
+              Look("look", "Look", Icons.Filled.Palette),
           }
           EOF
 
           cat > "$PKG/ui/Common.kt" <<'EOF'
-          package ai.venice.pubgcompanion.ui
+          package com.qalbidagx.pubg.ui
 
           import androidx.compose.foundation.background
           import androidx.compose.foundation.layout.*
@@ -1625,7 +2471,7 @@ jobs:
           EOF
 
           cat > "$PKG/ui/RmComponents.kt" <<'EOF'
-          package ai.venice.pubgcompanion.ui
+          package com.qalbidagx.pubg.ui
 
           import androidx.compose.foundation.background
           import androidx.compose.foundation.border
@@ -1644,10 +2490,10 @@ jobs:
           import androidx.compose.ui.text.font.FontWeight
           import androidx.compose.ui.unit.dp
           import androidx.compose.ui.unit.sp
-          import ai.venice.pubgcompanion.core.PerfMode
-          import ai.venice.pubgcompanion.ui.theme.Bg2
-          import ai.venice.pubgcompanion.ui.theme.Edge
-          import ai.venice.pubgcompanion.ui.theme.FgMuted
+          import com.qalbidagx.pubg.core.PerfMode
+          import com.qalbidagx.pubg.ui.theme.Bg2
+          import com.qalbidagx.pubg.ui.theme.Edge
+          import com.qalbidagx.pubg.ui.theme.FgMuted
 
           @Composable
           fun RmLabel(text: String, color: Color = FgMuted, modifier: Modifier = Modifier) {
@@ -1693,7 +2539,7 @@ jobs:
                   Text(
                       value,
                       fontFamily = FontFamily.Monospace,
-                      fontSize = 20.sp,
+                      fontSize = 18.sp,
                       fontWeight = FontWeight.Medium,
                       color = tint,
                   )
@@ -1744,7 +2590,7 @@ jobs:
                           )
                           Spacer(Modifier.height(4.dp))
                           Text(
-                              "${mode.coresOnline}C",
+                              if (mode.pinCores) "BIG" else "ALL",
                               fontFamily = FontFamily.Monospace,
                               fontSize = 11.sp,
                               color = if (active) Color.White else FgMuted,
@@ -1756,22 +2602,39 @@ jobs:
           EOF
 
           cat > "$PKG/ui/MainActivity.kt" <<'EOF'
-          package ai.venice.pubgcompanion.ui
+          package com.qalbidagx.pubg.ui
 
+          import android.Manifest
+          import android.app.Activity
+          import android.content.Intent
+          import android.content.pm.PackageManager
+          import android.media.projection.MediaProjectionManager
+          import android.os.Build
           import android.os.Bundle
           import androidx.activity.ComponentActivity
           import androidx.activity.compose.setContent
+          import androidx.activity.result.contract.ActivityResultContracts
           import androidx.compose.foundation.layout.padding
           import androidx.compose.material3.*
           import androidx.compose.runtime.*
           import androidx.compose.ui.Modifier
+          import androidx.compose.ui.graphics.Color
           import androidx.compose.ui.unit.sp
+          import androidx.core.content.ContextCompat
+          import androidx.lifecycle.compose.collectAsStateWithLifecycle
           import androidx.navigation.compose.*
-          import ai.venice.pubgcompanion.data.GameModeState
-          import ai.venice.pubgcompanion.system.ShizukuShell
-          import ai.venice.pubgcompanion.ui.screens.*
-          import ai.venice.pubgcompanion.ui.theme.CompanionTheme
+          import com.qalbidagx.pubg.data.GameModeState
+          import com.qalbidagx.pubg.data.SettingsStore
+          import com.qalbidagx.pubg.service.RecorderService
+          import com.qalbidagx.pubg.system.ShizukuShell
+          import com.qalbidagx.pubg.ui.screens.*
+          import com.qalbidagx.pubg.ui.theme.CompanionTheme
           import rikka.shizuku.Shizuku
+
+          object RecorderController {
+              var start: (() -> Unit)? = null
+              var stop: (() -> Unit)? = null
+          }
 
           class MainActivity : ComponentActivity() {
 
@@ -1779,12 +2642,58 @@ jobs:
                   if (ShizukuShell.hasPermission()) GameModeState.note("Shizuku granted")
               }
 
+              private var pendingAudio = false
+
+              private val projectionLauncher = registerForActivityResult(
+                  ActivityResultContracts.StartActivityForResult()
+              ) { result ->
+                  val data = result.data
+                  if (result.resultCode == Activity.RESULT_OK && data != null) {
+                      val i = Intent(this, RecorderService::class.java).apply {
+                          putExtra(RecorderService.EXTRA_CODE, result.resultCode)
+                          putExtra(RecorderService.EXTRA_DATA, data)
+                          putExtra(RecorderService.EXTRA_AUDIO, pendingAudio)
+                      }
+                      ContextCompat.startForegroundService(this, i)
+                  }
+              }
+
+              private val audioLauncher = registerForActivityResult(
+                  ActivityResultContracts.RequestPermission()
+              ) { granted ->
+                  pendingAudio = granted
+                  launchProjection()
+              }
+
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
                   Shizuku.addRequestPermissionResultListener(shizukuListener)
 
+                  RecorderController.start = {
+                      val hasAudio = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                          ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+                          PackageManager.PERMISSION_GRANTED
+                      if (hasAudio) {
+                          pendingAudio = true
+                          launchProjection()
+                      } else {
+                          audioLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                      }
+                  }
+                  RecorderController.stop = {
+                      ContextCompat.startForegroundService(
+                          this,
+                          Intent(this, RecorderService::class.java).setAction(RecorderService.ACTION_STOP),
+                      )
+                  }
+
                   setContent {
-                      CompanionTheme {
+                      val settings = remember { SettingsStore(applicationContext) }
+                      val accent by settings.accentColor.collectAsStateWithLifecycle(
+                          initialValue = 0xFFFF2A3C.toInt()
+                      )
+
+                      CompanionTheme(accent = Color(accent)) {
                           val nav = rememberNavController()
                           val entry by nav.currentBackStackEntryAsState()
                           val current = entry?.destination?.route
@@ -1803,7 +2712,7 @@ jobs:
                                                   }
                                               },
                                               icon = { Icon(d.icon, contentDescription = d.label) },
-                                              label = { Text(d.label, fontSize = 10.sp) },
+                                              label = { Text(d.label, fontSize = 9.sp) },
                                           )
                                       }
                                   }
@@ -1815,25 +2724,1467 @@ jobs:
                                   modifier = Modifier.padding(pad),
                               ) {
                                   composable(Dest.Dashboard.route) { DashboardScreen() }
+                                  composable(Dest.System.route) { SystemScreen() }
                                   composable(Dest.Profiles.route) { ProfilesScreen() }
                                   composable(Dest.Overlay.route) { OverlayScreen() }
                                   composable(Dest.Network.route) { NetworkScreen() }
                                   composable(Dest.Sensitivity.route) { SensitivityScreen() }
+                                  composable(Dest.Look.route) { LookScreen() }
                               }
                           }
                       }
                   }
               }
 
+              private fun launchProjection() {
+                  val mpm = getSystemService(MediaProjectionManager::class.java)
+                  projectionLauncher.launch(mpm.createScreenCaptureIntent())
+              }
+
               override fun onDestroy() {
                   runCatching { Shizuku.removeRequestPermissionResultListener(shizukuListener) }
+                  RecorderController.start = null
+                  RecorderController.stop = null
                   super.onDestroy()
               }
           }
           EOF
 
+          cat > "$PKG/ui/screens/DashboardScreen.kt" <<'EOF'
+          package com.qalbidagx.pubg.ui.screens
+
+          import android.app.Application
+          import android.content.Intent
+          import androidx.compose.foundation.layout.*
+          import androidx.compose.foundation.rememberScrollState
+          import androidx.compose.foundation.verticalScroll
+          import androidx.compose.material3.*
+          import androidx.compose.runtime.*
+          import androidx.compose.ui.Alignment
+          import androidx.compose.ui.Modifier
+          import androidx.compose.ui.platform.LocalContext
+          import androidx.compose.ui.text.font.FontFamily
+          import androidx.compose.ui.text.font.FontWeight
+          import androidx.compose.ui.unit.dp
+          import androidx.compose.ui.unit.sp
+          import androidx.core.content.ContextCompat
+          import androidx.lifecycle.*
+          import androidx.lifecycle.compose.LocalLifecycleOwner
+          import androidx.lifecycle.compose.collectAsStateWithLifecycle
+          import androidx.lifecycle.viewmodel.compose.viewModel
+          import com.qalbidagx.pubg.core.PermissionKind
+          import com.qalbidagx.pubg.core.Permissions
+          import com.qalbidagx.pubg.core.PerfMode
+          import com.qalbidagx.pubg.data.AppDatabase
+          import com.qalbidagx.pubg.data.GameModeState
+          import com.qalbidagx.pubg.data.ProfileRepository
+          import com.qalbidagx.pubg.data.SettingsStore
+          import com.qalbidagx.pubg.service.GameModeService
+          import com.qalbidagx.pubg.system.ShizukuShell
+          import com.qalbidagx.pubg.ui.*
+          import com.qalbidagx.pubg.ui.theme.Bad
+          import com.qalbidagx.pubg.ui.theme.Good
+          import com.qalbidagx.pubg.ui.theme.RmRed
+          import kotlinx.coroutines.flow.SharingStarted
+          import kotlinx.coroutines.flow.first
+          import kotlinx.coroutines.flow.stateIn
+          import kotlinx.coroutines.launch
+
+          class DashboardViewModel(app: Application) : AndroidViewModel(app) {
+
+              private val settings = SettingsStore(app)
+              private val repo = ProfileRepository(AppDatabase.get(app).profiles())
+
+              val inGame = GameModeState.inGame
+              val stats = GameModeState.stats
+              val activeProfile = GameModeState.activeProfile
+              val log = GameModeState.log
+              val mode = GameModeState.mode
+              val tweaks = GameModeState.tweaks
+              val playtime = GameModeState.playtime
+
+              val gameMode = settings.gameModeEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+              var missing by mutableStateOf<List<PermissionKind>>(emptyList())
+                  private set
+              var shizuku by mutableStateOf(false)
+                  private set
+
+              fun refresh() {
+                  missing = Permissions.missing(getApplication())
+                  shizuku = ShizukuShell.hasPermission()
+              }
+
+              fun toggleGameMode(on: Boolean) {
+                  val app = getApplication<Application>()
+                  viewModelScope.launch { settings.setGameMode(on) }
+                  val i = Intent(app, GameModeService::class.java)
+                  if (on) ContextCompat.startForegroundService(app, i) else app.stopService(i)
+              }
+
+              fun requestShizuku() = ShizukuShell.requestPermission()
+
+              fun selectMode(m: PerfMode) {
+                  viewModelScope.launch {
+                      val first = repo.enabled().firstOrNull() ?: return@launch
+                      repo.save(
+                          first.copy(
+                              perfMode = m.id,
+                              pinToBigCores = m.pinCores,
+                              boostPriority = m.pinCores,
+                          )
+                      )
+                      GameModeState.note("Mode set to ${m.label}")
+                  }
+              }
+          }
+
+          @Composable
+          fun DashboardScreen(vm: DashboardViewModel = viewModel()) {
+              val ctx = LocalContext.current
+              val inGame by vm.inGame.collectAsStateWithLifecycle()
+              val stats by vm.stats.collectAsStateWithLifecycle()
+              val active by vm.activeProfile.collectAsStateWithLifecycle()
+              val log by vm.log.collectAsStateWithLifecycle()
+              val mode by vm.mode.collectAsStateWithLifecycle()
+              val tweaks by vm.tweaks.collectAsStateWithLifecycle()
+              val playtime by vm.playtime.collectAsStateWithLifecycle()
+              val gameMode by vm.gameMode.collectAsStateWithLifecycle()
+
+              val owner = LocalLifecycleOwner.current
+              DisposableEffect(owner) {
+                  val obs = LifecycleEventObserver { _, e ->
+                      if (e == Lifecycle.Event.ON_RESUME) vm.refresh()
+                  }
+                  owner.lifecycle.addObserver(obs)
+                  onDispose { owner.lifecycle.removeObserver(obs) }
+              }
+
+              Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
+                  Text("QALBIDAGX PUBG", fontSize = 22.sp, fontWeight = FontWeight.Medium,
+                      letterSpacing = 2.sp, color = RmRed)
+                  Text("Gear up before you drop", fontSize = 11.sp,
+                      color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+                  SectionTitle("Performance mode")
+                  RmModeSelector(mode) { vm.selectMode(it) }
+                  Spacer(Modifier.height(8.dp))
+                  RmCard(accent = mode?.accent ?: RmRed) {
+                      Text(mode?.blurb ?: "Balanced default", fontSize = 12.sp,
+                          color = MaterialTheme.colorScheme.onSurfaceVariant)
+                  }
+
+                  SectionTitle("Status")
+                  RmCard(accent = if (inGame) RmRed else Good) {
+                      Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                          Text(
+                              if (inGame) "MATCH RUNNING" else "IDLE",
+                              fontFamily = FontFamily.Monospace, fontSize = 18.sp,
+                              fontWeight = FontWeight.Medium,
+                              color = if (inGame) RmRed else Good,
+                              modifier = Modifier.weight(1f),
+                          )
+                          if (inGame) {
+                              Text(
+                                  "%d:%02d".format(playtime / 60, playtime % 60),
+                                  fontFamily = FontFamily.Monospace, fontSize = 14.sp,
+                                  color = MaterialTheme.colorScheme.onSurfaceVariant,
+                              )
+                          }
+                      }
+                      if (active != null) {
+                          Text("Profile: $active", fontSize = 11.sp,
+                              color = MaterialTheme.colorScheme.onSurfaceVariant)
+                      }
+                      Spacer(Modifier.height(12.dp))
+                      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                          RmStat("FPS", (if (stats.fpsIsReal) "" else "~") + stats.fps, Modifier.weight(1f))
+                          RmStat("CPU", "${stats.cpuLoad}%", Modifier.weight(1f))
+                          RmStat("SOC", "%.0f".format(stats.socTempC), Modifier.weight(1f),
+                              if (stats.socTempC >= 43f) Bad else MaterialTheme.colorScheme.onSurface)
+                      }
+                      Spacer(Modifier.height(8.dp))
+                      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                          RmStat("GPU", "${stats.gpuMhz}", Modifier.weight(1f))
+                          RmStat("BAT", "%.0f".format(stats.batteryTempC), Modifier.weight(1f))
+                          RmStat("NET", if (stats.pingMs >= 0) "${stats.pingMs}" else "--", Modifier.weight(1f))
+                      }
+                  }
+
+                  SectionTitle("Auto game mode")
+                  RmCard {
+                      Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                          Column(Modifier.weight(1f)) {
+                              Text("Watch for PUBG", fontSize = 14.sp)
+                              Text("Applies your profile the moment a match starts",
+                                  fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                          }
+                          Switch(checked = gameMode, onCheckedChange = { vm.toggleGameMode(it) })
+                      }
+                  }
+
+                  if (tweaks.isNotEmpty()) {
+                      SectionTitle("Last applied")
+                      RmCard {
+                          tweaks.forEach { t ->
+                              Text(
+                                  "${if (t.ok) "OK" else "FAIL"}  ${t.name}",
+                                  fontFamily = FontFamily.Monospace, fontSize = 11.sp,
+                                  color = if (t.ok) Good else Bad,
+                              )
+                              Text(t.detail, fontSize = 10.sp,
+                                  color = MaterialTheme.colorScheme.onSurfaceVariant)
+                          }
+                      }
+                  }
+
+                  SectionTitle("Permissions")
+                  RmCard {
+                      if (vm.missing.isEmpty()) {
+                          Text("All set", color = Good, fontSize = 13.sp)
+                      } else {
+                          vm.missing.forEach { kind ->
+                              Row(Modifier.fillMaxWidth().padding(vertical = 5.dp),
+                                  verticalAlignment = Alignment.CenterVertically) {
+                                  Column(Modifier.weight(1f)) {
+                                      Text(kind.title, fontSize = 13.sp)
+                                      Text(kind.why, fontSize = 11.sp,
+                                          color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                  }
+                                  TextButton(onClick = {
+                                      ctx.startActivity(Permissions.intent(ctx, kind))
+                                  }) { Text("Grant") }
+                              }
+                          }
+                      }
+                  }
+
+                  SectionTitle("Shizuku")
+                  RmCard {
+                      Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                          Column(Modifier.weight(1f)) {
+                              Text("ADB rights", fontSize = 14.sp)
+                              Text(
+                                  if (vm.shizuku) "Active - full tuning available"
+                                  else "Missing - most tweaks disabled",
+                                  fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                              )
+                          }
+                          if (!vm.shizuku) {
+                              TextButton(onClick = { vm.requestShizuku() }) { Text("Request") }
+                          }
+                      }
+                  }
+
+                  SectionTitle("Log")
+                  RmCard {
+                      if (log.isEmpty()) {
+                          Text("Nothing yet", fontSize = 11.sp,
+                              color = MaterialTheme.colorScheme.onSurfaceVariant)
+                      } else {
+                          log.reversed().take(30).forEach {
+                              Text(it, fontFamily = FontFamily.Monospace, fontSize = 10.sp,
+                                  color = MaterialTheme.colorScheme.onSurfaceVariant)
+                          }
+                      }
+                  }
+
+                  Spacer(Modifier.height(24.dp))
+              }
+          }
+          EOF
+
+          cat > "$PKG/ui/screens/OverlayScreen.kt" <<'EOF'
+          package com.qalbidagx.pubg.ui.screens
+
+          import android.app.Application
+          import android.content.Intent
+          import androidx.compose.foundation.Canvas
+          import androidx.compose.foundation.background
+          import androidx.compose.foundation.border
+          import androidx.compose.foundation.clickable
+          import androidx.compose.foundation.layout.*
+          import androidx.compose.foundation.rememberScrollState
+          import androidx.compose.foundation.shape.CircleShape
+          import androidx.compose.foundation.shape.RoundedCornerShape
+          import androidx.compose.foundation.verticalScroll
+          import androidx.compose.material3.*
+          import androidx.compose.runtime.*
+          import androidx.compose.ui.Alignment
+          import androidx.compose.ui.Modifier
+          import androidx.compose.ui.draw.clip
+          import androidx.compose.ui.geometry.Offset
+          import androidx.compose.ui.graphics.Color
+          import androidx.compose.ui.graphics.Path
+          import androidx.compose.ui.graphics.drawscope.Stroke
+          import androidx.compose.ui.text.font.FontFamily
+          import androidx.compose.ui.text.font.FontWeight
+          import androidx.compose.ui.unit.dp
+          import androidx.compose.ui.unit.sp
+          import androidx.core.content.ContextCompat
+          import androidx.lifecycle.AndroidViewModel
+          import androidx.lifecycle.compose.collectAsStateWithLifecycle
+          import androidx.lifecycle.viewModelScope
+          import androidx.lifecycle.viewmodel.compose.viewModel
+          import com.qalbidagx.pubg.data.CrosshairStyle
+          import com.qalbidagx.pubg.data.GameModeState
+          import com.qalbidagx.pubg.data.SettingsStore
+          import com.qalbidagx.pubg.service.OverlayService
+          import com.qalbidagx.pubg.ui.Panel
+          import com.qalbidagx.pubg.ui.RecorderController
+          import com.qalbidagx.pubg.ui.SectionTitle
+          import com.qalbidagx.pubg.ui.ToggleRow
+          import com.qalbidagx.pubg.ui.theme.Bg2
+          import com.qalbidagx.pubg.ui.theme.Edge
+          import com.qalbidagx.pubg.ui.theme.Good
+          import com.qalbidagx.pubg.ui.theme.RmRed
+          import kotlinx.coroutines.flow.SharingStarted
+          import kotlinx.coroutines.flow.stateIn
+          import kotlinx.coroutines.launch
+
+          class OverlayViewModel(app: Application) : AndroidViewModel(app) {
+
+              private val settings = SettingsStore(app)
+
+              val enabled = settings.overlayEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, true)
+              val touchable = settings.overlayTouchable.stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
+              val xOn = settings.crosshairEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+              val xTouch = settings.crosshairTouchable.stateIn(viewModelScope, SharingStarted.Eagerly, true)
+              val shape = settings.crosshairShape.stateIn(viewModelScope, SharingStarted.Eagerly, "crossdot")
+              val color = settings.crosshairColor.stateIn(viewModelScope, SharingStarted.Eagerly, 0xFFFF2A3C.toInt())
+              val size = settings.crosshairSize.stateIn(viewModelScope, SharingStarted.Eagerly, 22)
+              val thickness = settings.crosshairThickness.stateIn(viewModelScope, SharingStarted.Eagerly, 3)
+              val gap = settings.crosshairGap.stateIn(viewModelScope, SharingStarted.Eagerly, 8)
+              val dot = settings.crosshairDot.stateIn(viewModelScope, SharingStarted.Eagerly, 3)
+              val alpha = settings.crosshairAlpha.stateIn(viewModelScope, SharingStarted.Eagerly, 220)
+              val outline = settings.crosshairOutline.stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
+              val recording = GameModeState.recording
+
+              private fun push() {
+                  val app = getApplication<Application>()
+                  ContextCompat.startForegroundService(app, Intent(app, OverlayService::class.java))
+              }
+
+              fun setEnabled(v: Boolean) = viewModelScope.launch { settings.setOverlay(v); push() }
+              fun setTouchable(v: Boolean) = viewModelScope.launch { settings.setTouchable(v); push() }
+              fun setXOn(v: Boolean) = viewModelScope.launch { settings.setCrosshairEnabled(v); push() }
+              fun setXTouch(v: Boolean) = viewModelScope.launch { settings.setCrosshairTouchable(v); push() }
+              fun setShape(v: String) = viewModelScope.launch { settings.setCrosshairShape(v); push() }
+              fun setColor(v: Int) = viewModelScope.launch { settings.setCrosshairColor(v); push() }
+              fun setSize(v: Int) = viewModelScope.launch { settings.setCrosshairSize(v); push() }
+              fun setThickness(v: Int) = viewModelScope.launch { settings.setCrosshairThickness(v); push() }
+              fun setGap(v: Int) = viewModelScope.launch { settings.setCrosshairGap(v); push() }
+              fun setDot(v: Int) = viewModelScope.launch { settings.setCrosshairDot(v); push() }
+              fun setAlpha(v: Int) = viewModelScope.launch { settings.setCrosshairAlpha(v); push() }
+              fun setOutline(v: Boolean) = viewModelScope.launch { settings.setCrosshairOutline(v); push() }
+              fun recenter() = viewModelScope.launch { settings.setCrosshairPos(0, 0); push() }
+          }
+
+          @Composable
+          fun OverlayScreen(vm: OverlayViewModel = viewModel()) {
+              val enabled by vm.enabled.collectAsStateWithLifecycle()
+              val touchable by vm.touchable.collectAsStateWithLifecycle()
+              val xOn by vm.xOn.collectAsStateWithLifecycle()
+              val xTouch by vm.xTouch.collectAsStateWithLifecycle()
+              val shape by vm.shape.collectAsStateWithLifecycle()
+              val color by vm.color.collectAsStateWithLifecycle()
+              val size by vm.size.collectAsStateWithLifecycle()
+              val thickness by vm.thickness.collectAsStateWithLifecycle()
+              val gap by vm.gap.collectAsStateWithLifecycle()
+              val dot by vm.dot.collectAsStateWithLifecycle()
+              val alpha by vm.alpha.collectAsStateWithLifecycle()
+              val outline by vm.outline.collectAsStateWithLifecycle()
+              val recording by vm.recording.collectAsStateWithLifecycle()
+
+              val preview = CrosshairStyle(shape, color, size, thickness, gap, dot, alpha, outline)
+
+              Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
+                  Text("Aim", fontSize = 22.sp, fontWeight = FontWeight.Medium)
+                  Text("Crosshair, stats overlay and recording.",
+                      fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+                  SectionTitle("Crosshair")
+                  Panel {
+                      ToggleRow("Show crosshair", xOn) { vm.setXOn(it) }
+                      ToggleRow("Draggable", xTouch) { vm.setXTouch(it) }
+
+                      if (xOn) {
+                          Spacer(Modifier.height(14.dp))
+
+                          Box(
+                              Modifier.fillMaxWidth().height(150.dp)
+                                  .clip(RoundedCornerShape(6.dp))
+                                  .background(Color(0xFF0B0B0E))
+                                  .border(1.dp, Edge, RoundedCornerShape(6.dp)),
+                              contentAlignment = Alignment.Center,
+                          ) {
+                              CrosshairPreview(preview)
+                          }
+
+                          Spacer(Modifier.height(14.dp))
+                          Text("Shape", fontSize = 11.sp)
+                          Spacer(Modifier.height(6.dp))
+                          Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                              CrosshairStyle.SHAPES.chunked(3).forEach { row ->
+                                  Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                      row.forEach { (id, label) ->
+                                          val active = shape == id
+                                          Box(
+                                              Modifier.weight(1f).height(34.dp)
+                                                  .clip(RoundedCornerShape(4.dp))
+                                                  .background(if (active) RmRed.copy(alpha = 0.18f) else Bg2)
+                                                  .border(
+                                                      if (active) 2.dp else 1.dp,
+                                                      if (active) RmRed else Edge,
+                                                      RoundedCornerShape(4.dp),
+                                                  )
+                                                  .clickable { vm.setShape(id) },
+                                              contentAlignment = Alignment.Center,
+                                          ) {
+                                              Text(
+                                                  label, fontSize = 10.sp,
+                                                  color = if (active) RmRed
+                                                  else MaterialTheme.colorScheme.onSurfaceVariant,
+                                              )
+                                          }
+                                      }
+                                  }
+                              }
+                          }
+
+                          Spacer(Modifier.height(14.dp))
+                          Text("Colour", fontSize = 11.sp)
+                          Spacer(Modifier.height(6.dp))
+                          Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                              CrosshairStyle.COLORS.forEach { (value, _) ->
+                                  val active = color == value
+                                  Box(
+                                      Modifier.size(30.dp)
+                                          .clip(CircleShape)
+                                          .background(Color(value))
+                                          .border(
+                                              if (active) 3.dp else 1.dp,
+                                              if (active) Color.White else Edge,
+                                              CircleShape,
+                                          )
+                                          .clickable { vm.setColor(value) },
+                                  )
+                              }
+                          }
+
+                          Spacer(Modifier.height(14.dp))
+                          SliderRow("Size", size, 8, 60) { vm.setSize(it) }
+                          SliderRow("Thickness", thickness, 1, 10) { vm.setThickness(it) }
+                          SliderRow("Gap", gap, 0, 30) { vm.setGap(it) }
+                          SliderRow("Dot", dot, 0, 12) { vm.setDot(it) }
+                          SliderRow("Opacity", alpha, 60, 255) { vm.setAlpha(it) }
+                          ToggleRow("Black outline", outline) { vm.setOutline(it) }
+
+                          Spacer(Modifier.height(6.dp))
+                          OutlinedButton(onClick = { vm.recenter() }, modifier = Modifier.fillMaxWidth()) {
+                              Text("Recentre crosshair")
+                          }
+                      }
+                  }
+
+                  SectionTitle("Stats overlay")
+                  Panel {
+                      ToggleRow("Show live stats", enabled) { vm.setEnabled(it) }
+                      ToggleRow("Movable", touchable) { vm.setTouchable(it) }
+                      Spacer(Modifier.height(8.dp))
+                      Text(
+                          "FPS, CPU load, CPU and GPU clocks, SoC temperature, battery current, " +
+                              "network jitter and packet loss.",
+                          fontSize = 11.sp,
+                          color = MaterialTheme.colorScheme.onSurfaceVariant,
+                      )
+                  }
+
+                  SectionTitle("Recording")
+                  Panel {
+                      Button(
+                          onClick = {
+                              if (recording) RecorderController.stop?.invoke()
+                              else RecorderController.start?.invoke()
+                          },
+                          colors = if (recording) {
+                              ButtonDefaults.buttonColors(containerColor = RmRed)
+                          } else ButtonDefaults.buttonColors(),
+                          modifier = Modifier.fillMaxWidth(),
+                      ) {
+                          Text(if (recording) "Stop recording" else "Start recording")
+                      }
+                      Spacer(Modifier.height(8.dp))
+                      Text(
+                          if (recording) "A red button floats on screen. Tap it to stop."
+                          else "Records the screen at 60 fps with microphone audio.",
+                          fontSize = 11.sp,
+                          color = if (recording) Good else MaterialTheme.colorScheme.onSurfaceVariant,
+                      )
+                      Spacer(Modifier.height(8.dp))
+                      Text(
+                          "Saved to Android/data/com.qalbidagx.pubg/files/recordings",
+                          fontFamily = FontFamily.Monospace,
+                          fontSize = 10.sp,
+                          color = MaterialTheme.colorScheme.onSurfaceVariant,
+                      )
+                  }
+
+                  Spacer(Modifier.height(24.dp))
+              }
+          }
+
+          @Composable
+          private fun SliderRow(label: String, value: Int, min: Int, max: Int, onChange: (Int) -> Unit) {
+              Column(Modifier.padding(top = 6.dp)) {
+                  Text("$label: $value", fontSize = 11.sp)
+                  Slider(
+                      value = value.toFloat(),
+                      onValueChange = { onChange(it.toInt()) },
+                      valueRange = min.toFloat()..max.toFloat(),
+                  )
+              }
+          }
+
+          @Composable
+          private fun CrosshairPreview(style: CrosshairStyle) {
+              val scale = 1.9f
+              val c = Color(style.color).copy(alpha = style.alpha / 255f)
+              val outlineColor = Color.Black.copy(alpha = style.alpha / 255f * 0.55f)
+
+              Canvas(Modifier.size(140.dp)) {
+                  val cx = size.width / 2f
+                  val cy = size.height / 2f
+                  val gap = style.gapPx * scale
+                  val len = style.sizePx * scale
+                  val th = style.thicknessPx * scale
+                  val dr = style.dotRadiusPx * scale
+
+                  fun line(x1: Float, y1: Float, x2: Float, y2: Float) {
+                      if (style.outline) {
+                          drawLine(outlineColor, Offset(x1, y1), Offset(x2, y2), th + 3f)
+                      }
+                      drawLine(c, Offset(x1, y1), Offset(x2, y2), th)
+                  }
+
+                  fun arms() {
+                      line(cx - gap - len, cy, cx - gap, cy)
+                      line(cx + gap, cy, cx + gap + len, cy)
+                      line(cx, cy - gap - len, cx, cy - gap)
+                      line(cx, cy + gap, cx, cy + gap + len)
+                  }
+
+                  fun ring(r: Float) {
+                      if (style.outline) drawCircle(outlineColor, r, Offset(cx, cy), style = Stroke(th + 3f))
+                      drawCircle(c, r, Offset(cx, cy), style = Stroke(th))
+                  }
+
+                  fun dot() {
+                      if (style.outline) drawCircle(outlineColor, dr + 2.5f, Offset(cx, cy))
+                      drawCircle(c, dr, Offset(cx, cy))
+                  }
+
+                  when (style.shape) {
+                      "dot" -> dot()
+                      "circle" -> ring(gap + len / 2f)
+                      "cross" -> arms()
+                      "tee" -> {
+                          line(cx - gap - len, cy, cx - gap, cy)
+                          line(cx + gap, cy, cx + gap + len, cy)
+                          line(cx, cy + gap, cx, cy + gap + len)
+                      }
+                      "chevron" -> {
+                          val p = Path().apply {
+                              moveTo(cx - len, cy + len / 2f)
+                              lineTo(cx, cy - len / 2f)
+                              lineTo(cx + len, cy + len / 2f)
+                          }
+                          if (style.outline) drawPath(p, outlineColor, style = Stroke(th + 3f))
+                          drawPath(p, c, style = Stroke(th))
+                      }
+                      else -> {
+                          ring(gap + len / 2f)
+                          arms()
+                          dot()
+                      }
+                  }
+              }
+          }
+          EOF
+
+          cat > "$PKG/ui/screens/LookScreen.kt" <<'EOF'
+          package com.qalbidagx.pubg.ui.screens
+
+          import android.app.Application
+          import androidx.compose.foundation.background
+          import androidx.compose.foundation.border
+          import androidx.compose.foundation.clickable
+          import androidx.compose.foundation.layout.*
+          import androidx.compose.foundation.rememberScrollState
+          import androidx.compose.foundation.shape.CircleShape
+          import androidx.compose.foundation.verticalScroll
+          import androidx.compose.material3.*
+          import androidx.compose.runtime.*
+          import androidx.compose.ui.Alignment
+          import androidx.compose.ui.Modifier
+          import androidx.compose.ui.draw.clip
+          import androidx.compose.ui.graphics.Color
+          import androidx.compose.ui.text.font.FontWeight
+          import androidx.compose.ui.unit.dp
+          import androidx.compose.ui.unit.sp
+          import androidx.lifecycle.AndroidViewModel
+          import androidx.lifecycle.compose.collectAsStateWithLifecycle
+          import androidx.lifecycle.viewModelScope
+          import androidx.lifecycle.viewmodel.compose.viewModel
+          import com.qalbidagx.pubg.data.SettingsStore
+          import com.qalbidagx.pubg.ui.Panel
+          import com.qalbidagx.pubg.ui.SectionTitle
+          import com.qalbidagx.pubg.ui.theme.Bad
+          import com.qalbidagx.pubg.ui.theme.Edge
+          import com.qalbidagx.pubg.ui.theme.Good
+          import com.qalbidagx.pubg.ui.theme.RmCyan
+          import kotlinx.coroutines.launch
+
+          class LookViewModel(app: Application) : AndroidViewModel(app) {
+              private val settings = SettingsStore(app)
+              val accent = settings.accentColor
+              fun setAccent(v: Int) = viewModelScope.launch { settings.setAccent(v) }
+          }
+
+          private val ACCENTS = listOf(
+              0xFFFF2A3C.toInt() to "Red Magic",
+              0xFF00E5FF.toInt() to "Cyan",
+              0xFF3DDC84.toInt() to "Green",
+              0xFFFFB300.toInt() to "Amber",
+              0xFFFF6D00.toInt() to "Orange",
+              0xFF9C27B0.toInt() to "Purple",
+              0xFFFF4081.toInt() to "Pink",
+              0xFFFFFFFF.toInt() to "White",
+          )
+
+          @Composable
+          fun LookScreen(vm: LookViewModel = viewModel()) {
+              val accent by vm.accent.collectAsStateWithLifecycle(initialValue = 0xFFFF2A3C.toInt())
+
+              Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
+                  Text("Look", fontSize = 22.sp, fontWeight = FontWeight.Medium)
+                  Text("Accent colour for the whole app.",
+                      fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+                  SectionTitle("Accent")
+                  Panel {
+                      Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                          ACCENTS.chunked(4).forEach { row ->
+                              Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                  row.forEach { (value, label) ->
+                                      val active = accent == value
+                                      Column(
+                                          Modifier.weight(1f),
+                                          horizontalAlignment = Alignment.CenterHorizontally,
+                                      ) {
+                                          Box(
+                                              Modifier.size(44.dp)
+                                                  .clip(CircleShape)
+                                                  .background(Color(value))
+                                                  .border(
+                                                      if (active) 3.dp else 1.dp,
+                                                      if (active) Color.White else Edge,
+                                                      CircleShape,
+                                                  )
+                                                  .clickable { vm.setAccent(value) },
+                                          )
+                                          Spacer(Modifier.height(4.dp))
+                                          Text(
+                                              label, fontSize = 9.sp,
+                                              color = if (active) Color.White
+                                              else MaterialTheme.colorScheme.onSurfaceVariant,
+                                          )
+                                      }
+                                  }
+                              }
+                          }
+                      }
+                      Spacer(Modifier.height(14.dp))
+                      Text(
+                          "Buttons, mode selector and the overlay edge all follow this colour.",
+                          fontSize = 11.sp,
+                          color = MaterialTheme.colorScheme.onSurfaceVariant,
+                      )
+                  }
+
+                  SectionTitle("Status colours")
+                  Panel {
+                      Row(verticalAlignment = Alignment.CenterVertically) {
+                          Text("OK", color = Good, fontSize = 12.sp, modifier = Modifier.width(60.dp))
+                          Text("Tweak applied", fontSize = 11.sp,
+                              color = MaterialTheme.colorScheme.onSurfaceVariant)
+                      }
+                      Spacer(Modifier.height(6.dp))
+                      Row(verticalAlignment = Alignment.CenterVertically) {
+                          Text("FAIL", color = Bad, fontSize = 12.sp, modifier = Modifier.width(60.dp))
+                          Text("Kernel or permission blocked it", fontSize = 11.sp,
+                              color = MaterialTheme.colorScheme.onSurfaceVariant)
+                      }
+                      Spacer(Modifier.height(6.dp))
+                      Row(verticalAlignment = Alignment.CenterVertically) {
+                          Text("INFO", color = RmCyan, fontSize = 12.sp, modifier = Modifier.width(60.dp))
+                          Text("Neutral reading", fontSize = 11.sp,
+                              color = MaterialTheme.colorScheme.onSurfaceVariant)
+                      }
+                  }
+
+                  Spacer(Modifier.height(24.dp))
+              }
+          }
+          EOF
+
+          cat > "$PKG/ui/screens/SystemScreen.kt" <<'EOF'
+          package com.qalbidagx.pubg.ui.screens
+
+          import android.app.Application
+          import androidx.compose.foundation.layout.*
+          import androidx.compose.foundation.rememberScrollState
+          import androidx.compose.foundation.verticalScroll
+          import androidx.compose.material3.*
+          import androidx.compose.runtime.*
+          import androidx.compose.ui.Modifier
+          import androidx.compose.ui.text.font.FontFamily
+          import androidx.compose.ui.text.font.FontWeight
+          import androidx.compose.ui.unit.dp
+          import androidx.compose.ui.unit.sp
+          import androidx.lifecycle.AndroidViewModel
+          import androidx.lifecycle.compose.collectAsStateWithLifecycle
+          import androidx.lifecycle.viewModelScope
+          import androidx.lifecycle.viewmodel.compose.viewModel
+          import com.qalbidagx.pubg.core.GamePackages
+          import com.qalbidagx.pubg.data.GameModeState
+          import com.qalbidagx.pubg.system.ChargeController
+          import com.qalbidagx.pubg.system.DeviceProfiler
+          import com.qalbidagx.pubg.system.PerfTuner
+          import com.qalbidagx.pubg.system.ProcessTuner
+          import com.qalbidagx.pubg.system.ShizukuShell
+          import com.qalbidagx.pubg.system.ThermalReader
+          import com.qalbidagx.pubg.system.Tweak
+          import com.qalbidagx.pubg.ui.Panel
+          import com.qalbidagx.pubg.ui.SectionTitle
+          import com.qalbidagx.pubg.ui.theme.Bad
+          import com.qalbidagx.pubg.ui.theme.Good
+          import kotlinx.coroutines.Dispatchers
+          import kotlinx.coroutines.launch
+          import kotlinx.coroutines.withContext
+
+          class SystemViewModel(app: Application) : AndroidViewModel(app) {
+
+              var report by mutableStateOf<List<Tweak>>(emptyList())
+                  private set
+              var running by mutableStateOf(false)
+                  private set
+
+              val device = GameModeState.device
+
+              fun runDiagnostics() {
+                  if (running) return
+                  running = true
+                  viewModelScope.launch {
+                      val out = withContext(Dispatchers.IO) {
+                          val list = mutableListOf<Tweak>()
+                          val sh = ShizukuShell.hasPermission()
+                          list += Tweak("Shizuku", sh, if (sh) "granted" else "not granted")
+
+                          val dev = runCatching { DeviceProfiler.profile() }.getOrNull()
+                              ?: return@withContext list
+                          list += Tweak("SoC", true, dev.soc.ifBlank { "unknown" })
+                          list += Tweak("Cores", true, "${dev.cores} total, big ${dev.bigCores}")
+                          list += Tweak("Affinity mask", true, "0x${dev.clusterMaskHex}")
+                          list += Tweak("Max refresh", true, "${dev.maxRefreshHz} Hz")
+                          list += Tweak("GPU devfreq node", dev.gpuPath != null, dev.gpuPath ?: "none")
+                          list += Tweak("Thermal zones", dev.thermalZones > 0, "${dev.thermalZones} zones")
+                          list += Tweak("taskset", dev.tasksetAvailable, "core pinning")
+                          list += Tweak("chrt", dev.chrtAvailable, "real-time priority")
+
+                          val hot = ThermalReader.hottest()
+                          list += Tweak(
+                              "Hottest zone", hot != null,
+                              hot?.let { "${it.first} %.1f C".format(it.second) } ?: "n/a"
+                          )
+
+                          val gov = ShizukuShell.exec("cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor")
+                          list += Tweak("Governor read", gov != null, gov ?: "unreadable")
+                          list += Tweak(
+                              "Governor write",
+                              ShizukuShell.ok("echo schedutil > /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor"),
+                              "kernel may block this"
+                          )
+
+                          list += Tweak(
+                              "cmd power",
+                              ShizukuShell.exec("cmd power get-fixed-performance-mode-enabled") != null,
+                              "fixed performance mode"
+                          )
+                          list += Tweak(
+                              "cmd thermalservice",
+                              ShizukuShell.exec("cmd thermalservice get-current-thermal-status") != null,
+                              "thermal override"
+                          )
+
+                          val pid = ProcessTuner.report(GamePackages.PRIMARY)
+                          list += Tweak("Game process", pid != "not running", pid)
+                          list
+                      }
+                      report = out
+                      running = false
+                  }
+              }
+
+              fun testCharge() {
+                  viewModelScope.launch {
+                      val (ok, detail) = withContext(Dispatchers.IO) { ChargeController.setBypass(true) }
+                      report = report + Tweak("Charge separation", ok, detail)
+                      GameModeState.note("Charge test: $detail")
+                  }
+              }
+
+              fun compileGame() {
+                  viewModelScope.launch {
+                      val t = withContext(Dispatchers.IO) { PerfTuner.aotCompile(GamePackages.PRIMARY) }
+                      GameModeState.note("${t.name}: ${t.detail}")
+                  }
+              }
+
+              fun dexopt() {
+                  viewModelScope.launch {
+                      withContext(Dispatchers.IO) { PerfTuner.dexopt() }
+                      GameModeState.note("Dexopt queued")
+                  }
+              }
+          }
+
+          @Composable
+          fun SystemScreen(vm: SystemViewModel = viewModel()) {
+              val dev by vm.device.collectAsStateWithLifecycle()
+
+              Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
+                  Text("System", fontSize = 22.sp, fontWeight = FontWeight.Medium)
+                  Text("What your hardware actually supports. Nothing is assumed.",
+                      fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+                  SectionTitle("Device")
+                  Panel {
+                      val d = dev
+                      if (d == null) {
+                          Text("Profiling...", fontSize = 12.sp,
+                              color = MaterialTheme.colorScheme.onSurfaceVariant)
+                      } else {
+                          InfoRow("SoC", d.soc.ifBlank { "unknown" })
+                          InfoRow("Board", d.board.ifBlank { "unknown" })
+                          InfoRow("Cores", d.cores.toString())
+                          InfoRow("Big cluster", d.bigCores.joinToString(", "))
+                          InfoRow("Affinity mask", "0x${d.clusterMaskHex}")
+                          InfoRow("Max refresh", "${d.maxRefreshHz} Hz")
+                          InfoRow("GPU node", d.gpuPath ?: "none found")
+                          InfoRow("Thermal zones", d.thermalZones.toString())
+                      }
+                  }
+
+                  SectionTitle("Diagnostics")
+                  Panel {
+                      Button(
+                          onClick = { vm.runDiagnostics() },
+                          enabled = !vm.running,
+                          modifier = Modifier.fillMaxWidth(),
+                      ) { Text(if (vm.running) "Running..." else "Run full check") }
+
+                      Spacer(Modifier.height(8.dp))
+                      OutlinedButton(onClick = { vm.testCharge() }, modifier = Modifier.fillMaxWidth()) {
+                          Text("Test charge separation")
+                      }
+
+                      if (vm.report.isNotEmpty()) {
+                          Spacer(Modifier.height(14.dp))
+                          vm.report.forEach { t ->
+                              Row(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+                                  Text(
+                                      if (t.ok) "OK" else "FAIL",
+                                      fontFamily = FontFamily.Monospace,
+                                      fontSize = 11.sp,
+                                      color = if (t.ok) Good else Bad,
+                                      modifier = Modifier.width(44.dp),
+                                  )
+                                  Column(Modifier.weight(1f)) {
+                                      Text(t.name, fontSize = 12.sp)
+                                      Text(t.detail, fontFamily = FontFamily.Monospace, fontSize = 10.sp,
+                                          color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                  }
+                              }
+                          }
+                      }
+                  }
+
+                  SectionTitle("Maintenance")
+                  Panel {
+                      Button(onClick = { vm.compileGame() }, modifier = Modifier.fillMaxWidth()) {
+                          Text("AOT compile PUBG")
+                      }
+                      Spacer(Modifier.height(8.dp))
+                      OutlinedButton(onClick = { vm.dexopt() }, modifier = Modifier.fillMaxWidth()) {
+                          Text("Run dexopt")
+                      }
+                      Spacer(Modifier.height(8.dp))
+                      Text(
+                          "Compiling ahead of time makes the first match load faster and reduces " +
+                              "stutter while shaders warm up. Run it once.",
+                          fontSize = 11.sp,
+                          color = MaterialTheme.colorScheme.onSurfaceVariant,
+                      )
+                  }
+
+                  Spacer(Modifier.height(24.dp))
+              }
+          }
+
+          @Composable
+          private fun InfoRow(label: String, value: String) {
+              Row(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+                  Text(label, fontSize = 12.sp, modifier = Modifier.width(120.dp),
+                      color = MaterialTheme.colorScheme.onSurfaceVariant)
+                  Text(value, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+              }
+          }
+          EOF
+
+          cat > "$PKG/ui/screens/ProfilesScreen.kt" <<'EOF'
+          package com.qalbidagx.pubg.ui.screens
+
+          import android.app.Application
+          import androidx.compose.foundation.clickable
+          import androidx.compose.foundation.layout.*
+          import androidx.compose.foundation.lazy.LazyColumn
+          import androidx.compose.foundation.lazy.items
+          import androidx.compose.foundation.rememberScrollState
+          import androidx.compose.foundation.verticalScroll
+          import androidx.compose.material.icons.Icons
+          import androidx.compose.material.icons.filled.Add
+          import androidx.compose.material.icons.filled.Delete
+          import androidx.compose.material3.*
+          import androidx.compose.runtime.*
+          import androidx.compose.ui.Alignment
+          import androidx.compose.ui.Modifier
+          import androidx.compose.ui.text.font.FontWeight
+          import androidx.compose.ui.unit.dp
+          import androidx.compose.ui.unit.sp
+          import androidx.lifecycle.AndroidViewModel
+          import androidx.lifecycle.compose.collectAsStateWithLifecycle
+          import androidx.lifecycle.viewModelScope
+          import androidx.lifecycle.viewmodel.compose.viewModel
+          import com.qalbidagx.pubg.data.AppDatabase
+          import com.qalbidagx.pubg.data.Profile
+          import com.qalbidagx.pubg.data.ProfileRepository
+          import com.qalbidagx.pubg.ui.ToggleRow
+          import kotlinx.coroutines.flow.SharingStarted
+          import kotlinx.coroutines.flow.stateIn
+          import kotlinx.coroutines.launch
+
+          class ProfilesViewModel(app: Application) : AndroidViewModel(app) {
+              private val repo = ProfileRepository(AppDatabase.get(app).profiles())
+              val profiles = repo.all.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+              fun save(p: Profile) = viewModelScope.launch { repo.save(p) }
+              fun delete(p: Profile) = viewModelScope.launch { repo.delete(p) }
+          }
+
+          @Composable
+          fun ProfilesScreen(vm: ProfilesViewModel = viewModel()) {
+              val profiles by vm.profiles.collectAsStateWithLifecycle()
+              var editing by remember { mutableStateOf<Profile?>(null) }
+
+              LazyColumn(Modifier.fillMaxSize().padding(16.dp)) {
+                  item {
+                      Text("Profiles", fontSize = 22.sp, fontWeight = FontWeight.Medium)
+                      Text("The first enabled profile is used when a match starts.",
+                          fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                      Spacer(Modifier.height(12.dp))
+                  }
+                  items(profiles, key = { it.id }) { p ->
+                      Surface(
+                          color = MaterialTheme.colorScheme.surface,
+                          shape = MaterialTheme.shapes.medium,
+                          modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                              .clickable { editing = p },
+                      ) {
+                          Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                              Column(Modifier.weight(1f)) {
+                                  Text(p.name, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                                  Text(
+                                      buildString {
+                                          append(p.perfMode.uppercase())
+                                          append("  ·  ${p.refreshRateHz} Hz")
+                                          if (p.pinToBigCores) append("  ·  pinned")
+                                          if (p.chargeSeparation) append("  ·  no charge")
+                                          if (p.lowerResolution) {
+                                              append("  ·  ${p.resolutionWidth}x${p.resolutionHeight}")
+                                          }
+                                          if (!p.enabled) append("  ·  off")
+                                      },
+                                      fontSize = 11.sp,
+                                      color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                  )
+                              }
+                              IconButton(onClick = { vm.delete(p) }) {
+                                  Icon(Icons.Filled.Delete, contentDescription = "Delete")
+                              }
+                          }
+                      }
+                  }
+                  item {
+                      OutlinedButton(
+                          onClick = { editing = Profile(name = "New profile") },
+                          modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                      ) {
+                          Icon(Icons.Filled.Add, contentDescription = null)
+                          Spacer(Modifier.width(8.dp))
+                          Text("New profile")
+                      }
+                  }
+              }
+
+              editing?.let { p ->
+                  ProfileEditor(p, onDismiss = { editing = null }, onSave = { vm.save(it); editing = null })
+              }
+          }
+
+          @Composable
+          private fun ProfileEditor(initial: Profile, onDismiss: () -> Unit, onSave: (Profile) -> Unit) {
+              var p by remember { mutableStateOf(initial) }
+
+              AlertDialog(
+                  onDismissRequest = onDismiss,
+                  title = { Text(if (initial.id == 0L) "New profile" else "Edit profile") },
+                  text = {
+                      Column(Modifier.verticalScroll(rememberScrollState())) {
+                          OutlinedTextField(
+                              value = p.name,
+                              onValueChange = { p = p.copy(name = it) },
+                              label = { Text("Name") },
+                              singleLine = true,
+                              modifier = Modifier.fillMaxWidth(),
+                          )
+                          Spacer(Modifier.height(12.dp))
+                          ToggleRow("Enabled", p.enabled) { p = p.copy(enabled = it) }
+                          ToggleRow("Do Not Disturb", p.dnd) { p = p.copy(dnd = it) }
+                          ToggleRow("Pin to big cores", p.pinToBigCores) { p = p.copy(pinToBigCores = it) }
+                          ToggleRow("Raise process priority", p.boostPriority) {
+                              p = p.copy(boostPriority = it)
+                          }
+                          ToggleRow("Restrict background apps", p.restrictBackground) {
+                              p = p.copy(restrictBackground = it)
+                          }
+                          ToggleRow("Charge separation", p.chargeSeparation) {
+                              p = p.copy(chargeSeparation = it)
+                          }
+                          ToggleRow("Lower resolution (Shizuku)", p.lowerResolution) {
+                              p = p.copy(lowerResolution = it)
+                          }
+                          ToggleRow("Force stop bloat", p.killBackground) {
+                              p = p.copy(killBackground = it)
+                          }
+                          ToggleRow("Thermal guard", p.thermalGuard) { p = p.copy(thermalGuard = it) }
+
+                          Spacer(Modifier.height(12.dp))
+                          Text("Brightness: ${p.brightnessPercent}%", fontSize = 11.sp)
+                          Slider(
+                              value = p.brightnessPercent.toFloat(),
+                              onValueChange = { p = p.copy(brightnessPercent = it.toInt()) },
+                              valueRange = 20f..100f,
+                          )
+
+                          Text("Refresh rate: ${p.refreshRateHz} Hz", fontSize = 11.sp)
+                          Slider(
+                              value = p.refreshRateHz.toFloat(),
+                              onValueChange = { p = p.copy(refreshRateHz = it.toInt()) },
+                              valueRange = 60f..165f,
+                              steps = 4,
+                          )
+
+                          if (p.lowerResolution) {
+                              Text("Height: ${p.resolutionHeight} px", fontSize = 11.sp)
+                              Slider(
+                                  value = p.resolutionHeight.toFloat(),
+                                  onValueChange = {
+                                      val h = it.toInt()
+                                      p = p.copy(
+                                          resolutionHeight = h,
+                                          resolutionWidth = h * 16 / 9,
+                                          resolutionDpi = (h * 240 / 1080f).toInt().coerceIn(160, 480),
+                                      )
+                                  },
+                                  valueRange = 540f..1080f,
+                                  steps = 3,
+                              )
+                          }
+
+                          if (p.thermalGuard) {
+                              Text("Temp limit: ${p.temperatureLimitC} C", fontSize = 11.sp)
+                              Slider(
+                                  value = p.temperatureLimitC.toFloat(),
+                                  onValueChange = { p = p.copy(temperatureLimitC = it.toInt()) },
+                                  valueRange = 35f..50f,
+                              )
+                          }
+                      }
+                  },
+                  confirmButton = {
+                      TextButton(onClick = { if (p.name.isNotBlank()) onSave(p) }) { Text("Save") }
+                  },
+                  dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+              )
+          }
+          EOF
+
+          cat > "$PKG/ui/screens/NetworkScreen.kt" <<'EOF'
+          package com.qalbidagx.pubg.ui.screens
+
+          import android.app.Application
+          import androidx.compose.foundation.Canvas
+          import androidx.compose.foundation.layout.*
+          import androidx.compose.foundation.rememberScrollState
+          import androidx.compose.foundation.verticalScroll
+          import androidx.compose.material3.*
+          import androidx.compose.runtime.*
+          import androidx.compose.ui.Modifier
+          import androidx.compose.ui.graphics.Path
+          import androidx.compose.ui.graphics.drawscope.Stroke
+          import androidx.compose.ui.text.font.FontWeight
+          import androidx.compose.ui.unit.dp
+          import androidx.compose.ui.unit.sp
+          import androidx.lifecycle.AndroidViewModel
+          import androidx.lifecycle.viewModelScope
+          import androidx.lifecycle.viewmodel.compose.viewModel
+          import com.qalbidagx.pubg.data.SettingsStore
+          import com.qalbidagx.pubg.system.NetworkMonitor
+          import com.qalbidagx.pubg.ui.Panel
+          import com.qalbidagx.pubg.ui.SectionTitle
+          import com.qalbidagx.pubg.ui.theme.Bad
+          import com.qalbidagx.pubg.ui.theme.Good
+          import com.qalbidagx.pubg.ui.theme.RmRed
+          import kotlinx.coroutines.flow.first
+          import kotlinx.coroutines.launch
+
+          class NetworkViewModel(app: Application) : AndroidViewModel(app) {
+
+              private val settings = SettingsStore(app)
+              private var monitor: NetworkMonitor? = null
+
+              var host by mutableStateOf("1.1.1.1")
+                  private set
+              var rtt by mutableIntStateOf(-1)
+                  private set
+              var jitter by mutableFloatStateOf(0f)
+                  private set
+              var loss by mutableFloatStateOf(0f)
+                  private set
+              var samples by mutableIntStateOf(0)
+                  private set
+
+              val history = mutableStateListOf<Int>()
+
+              init {
+                  viewModelScope.launch {
+                      host = settings.pingHost.first()
+                      restart()
+                  }
+              }
+
+              fun setHost(h: String) {
+                  host = h
+                  viewModelScope.launch { settings.setPingHost(h) }
+              }
+
+              fun restart() {
+                  monitor?.stop()
+                  monitor = NetworkMonitor(host) { r, j, l ->
+                      rtt = r
+                      jitter = j
+                      loss = l
+                      samples++
+                      history.add(if (r > 0) r else 0)
+                      if (history.size > 60) history.removeAt(0)
+                  }.also { it.start() }
+              }
+
+              override fun onCleared() {
+                  monitor?.stop()
+                  super.onCleared()
+              }
+          }
+
+          @Composable
+          fun NetworkScreen(vm: NetworkViewModel = viewModel()) {
+              Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
+                  Text("Network", fontSize = 22.sp, fontWeight = FontWeight.Medium)
+                  Text("Point this at your game server region for the numbers to mean anything.",
+                      fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+                  SectionTitle("Host")
+                  Panel {
+                      OutlinedTextField(
+                          value = vm.host,
+                          onValueChange = { vm.setHost(it) },
+                          label = { Text("IP or domain") },
+                          singleLine = true,
+                          modifier = Modifier.fillMaxWidth(),
+                      )
+                      Spacer(Modifier.height(10.dp))
+                      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                          listOf("1.1.1.1", "8.8.8.8", "9.9.9.9").forEach { preset ->
+                              AssistChip(
+                                  onClick = { vm.setHost(preset); vm.restart() },
+                                  label = { Text(preset) },
+                              )
+                          }
+                      }
+                  }
+
+                  SectionTitle("Live")
+                  Panel {
+                      Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                          Column(Modifier.weight(1f)) {
+                              Text("RTT", fontSize = 10.sp,
+                                  color = MaterialTheme.colorScheme.onSurfaceVariant)
+                              Text(
+                                  if (vm.rtt >= 0) "${vm.rtt} ms" else "lost",
+                                  fontSize = 18.sp,
+                                  color = if (vm.rtt >= 0) MaterialTheme.colorScheme.onSurface else Bad,
+                              )
+                          }
+                          Column(Modifier.weight(1f)) {
+                              Text("JITTER", fontSize = 10.sp,
+                                  color = MaterialTheme.colorScheme.onSurfaceVariant)
+                              Text("%.1f ms".format(vm.jitter), fontSize = 18.sp,
+                                  color = if (vm.jitter > 25f) Bad else Good)
+                          }
+                      }
+                      Spacer(Modifier.height(10.dp))
+                      Text("Loss %.1f%%  ·  %d samples".format(vm.loss, vm.samples), fontSize = 11.sp,
+                          color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+                      Spacer(Modifier.height(14.dp))
+                      Canvas(Modifier.fillMaxWidth().height(90.dp)) {
+                          if (vm.history.size < 2) return@Canvas
+                          val maxV = (vm.history.maxOrNull() ?: 100).coerceAtLeast(50).toFloat()
+                          val stepX = size.width / (vm.history.size - 1).coerceAtLeast(1)
+                          val path = Path()
+                          vm.history.forEachIndexed { i, v ->
+                              val x = i * stepX
+                              val y = size.height - (v / maxV) * (size.height - 6f) - 3f
+                              if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                          }
+                          drawPath(path, color = RmRed, style = Stroke(width = 3f))
+                      }
+
+                      Spacer(Modifier.height(10.dp))
+                      Button(onClick = { vm.restart() }, modifier = Modifier.fillMaxWidth()) {
+                          Text("Restart measurement")
+                      }
+                  }
+
+                  SectionTitle("How to read it")
+                  Panel {
+                      Text(
+                          "Under 60 ms is fine. Jitter matters more than the average - high jitter " +
+                              "feels like bullets not registering even when ping looks good.",
+                          fontSize = 11.sp,
+                          color = MaterialTheme.colorScheme.onSurfaceVariant,
+                      )
+                  }
+
+                  Spacer(Modifier.height(24.dp))
+              }
+          }
+          EOF
+
+          cat > "$PKG/ui/screens/SensitivityScreen.kt" <<'EOF'
+          package com.qalbidagx.pubg.ui.screens
+
+          import android.app.Application
+          import androidx.compose.foundation.layout.*
+          import androidx.compose.foundation.rememberScrollState
+          import androidx.compose.foundation.text.selection.SelectionContainer
+          import androidx.compose.foundation.verticalScroll
+          import androidx.compose.material3.*
+          import androidx.compose.runtime.*
+          import androidx.compose.ui.Modifier
+          import androidx.compose.ui.text.font.FontFamily
+          import androidx.compose.ui.text.font.FontWeight
+          import androidx.compose.ui.unit.dp
+          import androidx.compose.ui.unit.sp
+          import androidx.lifecycle.AndroidViewModel
+          import androidx.lifecycle.viewModelScope
+          import androidx.lifecycle.viewmodel.compose.viewModel
+          import com.qalbidagx.pubg.data.SettingsStore
+          import com.qalbidagx.pubg.ui.Panel
+          import com.qalbidagx.pubg.ui.SectionTitle
+          import com.qalbidagx.pubg.util.SensValues
+          import com.qalbidagx.pubg.util.SensitivityMath
+          import kotlinx.coroutines.flow.first
+          import kotlinx.coroutines.launch
+
+          class SensitivityViewModel(app: Application) : AndroidViewModel(app) {
+
+              private val settings = SettingsStore(app)
+
+              var values by mutableStateOf(SensValues())
+                  private set
+              var fromDpi by mutableIntStateOf(400)
+                  private set
+              var toDpi by mutableIntStateOf(400)
+                  private set
+              var code by mutableStateOf("")
+                  private set
+              var importText by mutableStateOf("")
+                  private set
+              var message by mutableStateOf<String?>(null)
+                  private set
+
+              init {
+                  viewModelScope.launch {
+                      val stored = settings.sensitivityCode.first()
+                      if (stored.isNotBlank()) {
+                          SensitivityMath.decode(stored)?.let { (v, d) ->
+                              values = v
+                              fromDpi = d
+                              toDpi = d
+                              code = stored
+                          }
+                      }
+                  }
+              }
+
+              fun setValue(index: Int, v: Float) { values = values.with(index, v) }
+              fun setFromDpi(d: Int) { fromDpi = d.coerceIn(100, 800) }
+              fun setToDpi(d: Int) { toDpi = d.coerceIn(100, 800) }
+              fun setImportText(t: String) { importText = t }
+
+              fun applyConversion() {
+                  val from = fromDpi
+                  values = SensitivityMath.convertAll(values, from, toDpi)
+                  fromDpi = toDpi
+                  message = "Converted from $from to $toDpi dpi"
+              }
+
+              fun export() {
+                  code = SensitivityMath.encode(values, fromDpi)
+                  viewModelScope.launch { settings.setSensitivityCode(code) }
+                  message = "Code created and saved"
+              }
+
+              fun doImport() {
+                  val decoded = SensitivityMath.decode(importText)
+                  if (decoded == null) {
+                      message = "Could not read that code"
+                      return
+                  }
+                  val (v, d) = decoded
+                  values = v
+                  fromDpi = d
+                  toDpi = d
+                  code = importText.trim()
+                  viewModelScope.launch { settings.setSensitivityCode(code) }
+                  message = "Code loaded"
+              }
+
+              fun reset() {
+                  values = SensValues()
+                  message = "Reset to 100"
+              }
+          }
+
+          @Composable
+          fun SensitivityScreen(vm: SensitivityViewModel = viewModel()) {
+              Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
+                  Text("Sensitivity", fontSize = 22.sp, fontWeight = FontWeight.Medium)
+                  Text("Converts your values between screen densities and packs them into a code.",
+                      fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+                  SectionTitle("DPI")
+                  Panel {
+                      Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                          OutlinedTextField(
+                              value = vm.fromDpi.toString(),
+                              onValueChange = { vm.setFromDpi(it.toIntOrNull() ?: 400) },
+                              label = { Text("Your dpi") },
+                              singleLine = true,
+                              modifier = Modifier.weight(1f),
+                          )
+                          OutlinedTextField(
+                              value = vm.toDpi.toString(),
+                              onValueChange = { vm.setToDpi(it.toIntOrNull() ?: 400) },
+                              label = { Text("Target dpi") },
+                              singleLine = true,
+                              modifier = Modifier.weight(1f),
+                          )
+                      }
+                      Spacer(Modifier.height(10.dp))
+                      Button(onClick = { vm.applyConversion() }, modifier = Modifier.fillMaxWidth()) {
+                          Text("Convert to target dpi")
+                      }
+                      Spacer(Modifier.height(6.dp))
+                      Text(
+                          "Same physical rotation per centimetre needs sensitivity scaled inversely " +
+                              "to dpi. Higher dpi means lower values.",
+                          fontSize = 11.sp,
+                          color = MaterialTheme.colorScheme.onSurfaceVariant,
+                      )
+                  }
+
+                  SectionTitle("Values")
+                  Panel {
+                      SensValues.LABELS.forEachIndexed { i, label ->
+                          Text("$label: ${vm.values.toList()[i].toInt()}", fontSize = 11.sp)
+                          Slider(
+                              value = vm.values.toList()[i],
+                              onValueChange = { vm.setValue(i, it) },
+                              valueRange = SensitivityMath.MIN..SensitivityMath.MAX,
+                          )
+                      }
+                      TextButton(onClick = { vm.reset() }) { Text("Reset all to 100") }
+                  }
+
+                  SectionTitle("Share code")
+                  Panel {
+                      Button(onClick = { vm.export() }, modifier = Modifier.fillMaxWidth()) {
+                          Text("Create code from my values")
+                      }
+                      if (vm.code.isNotBlank()) {
+                          Spacer(Modifier.height(12.dp))
+                          SelectionContainer {
+                              Text(vm.code, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                          }
+                      }
+                      Spacer(Modifier.height(16.dp))
+                      OutlinedTextField(
+                          value = vm.importText,
+                          onValueChange = { vm.setImportText(it) },
+                          label = { Text("Paste a code") },
+                          modifier = Modifier.fillMaxWidth(),
+                      )
+                      Spacer(Modifier.height(8.dp))
+                      OutlinedButton(onClick = { vm.doImport() }, modifier = Modifier.fillMaxWidth()) {
+                          Text("Load code")
+                      }
+                      vm.message?.let {
+                          Spacer(Modifier.height(10.dp))
+                          Text(it, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                      }
+                  }
+
+                  Spacer(Modifier.height(24.dp))
+              }
+          }
+          EOF
+
           cat > "$PKG/util/SensitivityMath.kt" <<'EOF'
-          package ai.venice.pubgcompanion.util
+          package com.qalbidagx.pubg.util
 
           import android.util.Base64
 
@@ -1900,11 +4251,11 @@ jobs:
 
               fun encode(values: SensValues, dpi: Int): String {
                   val raw = (listOf(dpi) + values.toList().map { (it * 10f).toInt() }).joinToString(",")
-                  return "PCS1-" + Base64.encodeToString(raw.toByteArray(), Base64.NO_WRAP or Base64.URL_SAFE)
+                  return "QDGX1-" + Base64.encodeToString(raw.toByteArray(), Base64.NO_WRAP or Base64.URL_SAFE)
               }
 
               fun decode(code: String): Pair<SensValues, Int>? {
-                  val body = code.trim().removePrefix("PCS1-")
+                  val body = code.trim().removePrefix("QDGX1-").removePrefix("PCS1-")
                   val raw = runCatching {
                       String(Base64.decode(body, Base64.NO_WRAP or Base64.URL_SAFE))
                   }.getOrNull() ?: return null
@@ -1920,7 +4271,7 @@ jobs:
               https://raw.githubusercontent.com/gradle/gradle/v8.11.1/gradle/wrapper/gradle-wrapper.jar
           fi
 
-          echo "==> klart"
+          echo "==> generated"
           BOOTSTRAP
           bash /tmp/gen.sh
 
@@ -1940,11 +4291,11 @@ jobs:
       - name: Collect APK
         run: |
           mkdir -p out
-          cp app/build/outputs/apk/debug/app-debug.apk out/PubgCompanion.apk
+          cp app/build/outputs/apk/debug/app-debug.apk out/QalbiDagxPubg.apk
 
       - uses: actions/upload-artifact@v4
         with:
-          name: PubgCompanion
+          name: QalbiDagxPubg
           path: out/*.apk
 
       - uses: softprops/action-gh-release@v2
