@@ -6,14 +6,14 @@ plugins {
 }
 
 android {
-    namespace = "ai.venice.pubgcompanion"
+    namespace = "com.qalbidagx.pubg"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "ai.venice.pubgcompanion"
+        applicationId = "com.qalbidagx.pubg"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
+        versionCode = 4
         versionName = "1.0"
     }
 

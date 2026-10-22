@@ -1,7 +1,7 @@
-# PUBG Companion
+# QalbiDagx PUBG
 
-Android performance companion for PUBG Mobile. Detects match start via usage
-stats, applies a saved profile, restores everything when the match ends.
+Performance companion for PUBG Mobile. Profiles the SoC, pins the game to the
+big cluster, neutralises background load, draws a crosshair, records gameplay,
+and restores everything afterwards.
 
-Install [Shizuku](https://shizuku.rikka.app/) for the full feature set.
-Grab the APK from the Releases tab.
+Grab the APK from Releases. Install Shizuku for the full feature set.
